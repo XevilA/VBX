@@ -109,6 +109,7 @@ Public Class Form1
         Public Property PassCount As Integer = 0
         Public Property FailCount As Integer = 0
         Public Property CameraUrl As String = "http://192.168.1.20/img/snapshot.jpg"
+        Public Property MasterBarcode As String = "12345"
         Public Property ProgramNames As String() = {"Program 1", "Program 2", "Program 3", "Program 4", "Program 5", "Program 6", "Program 7", "Program 8", "Program 9", "Program 10", "Program 11", "Program 12", "Program 13", "Program 14", "Program 15"}
     End Class
 
@@ -121,16 +122,30 @@ Public Class Form1
     Public Enum MachineStatus
         IDLE
         A1_WAIT_RETRACT     ' Wait for Cylinder Retract Sensor (DI 03)
-        A1_REMOVE_PART      ' Red Off, Green On, Wait for Start (DI 01)
+        A1_READY            ' Ready for new part
+        A1_BARCODE_SCAN     ' Scan barcode
+        WRONG_MODEL         ' Alarm wrong model
+        B1_READY            ' Wait for start & curtain sensor
         B1_DISPENSE_START   ' Robot Start Output (DO 04)
         B1_DISPENSE_WAIT    ' Wait for Robot Complete (DI 04)
-        B1_DISPENSE_POST    ' Yellow Off, Curtain Sensor Check (DI 02), Green Blink
+        B1_DISPENSE_POST    ' Yellow Off
         VISION_CHECK        ' Trigger Vision (TCP or DI 06/07)
-        FINISH_SUCCESS      ' Cylinder Retract & Unclamp (DO 10), Ready Green On, Send Data
+        FINISH_WAIT_ROBOT   ' Wait for Robot Home
+        FINISH_SUCCESS      ' Cylinder Retract & Unclamp (DO 10)
         ALARM
     End Enum
 
+    Public Enum BlinkColor
+        NONE
+        YELLOW
+        GREEN
+    End Enum
+
     Private currentState As MachineStatus = MachineStatus.IDLE
+    Private currentBlinkColor As BlinkColor = BlinkColor.NONE
+    Private robotWaitStart As DateTime
+    Private blinkState As Boolean = False
+    Private blinkCounter As Integer = 0
     Private modbusClient As ModbusClient
     Private inputs(15) As Boolean
     Private outputs(15) As Boolean
@@ -141,14 +156,12 @@ Public Class Form1
     
     Private isEStopActive As Boolean = False
     Private isPaused As Boolean = False 
-    Private isTowerBlinking As Boolean = False
-    Private towerBlinkTick As Integer = 0
     Private ReadOnly logPath As String = IO.Path.Combine(Application.StartupPath, "ProductionLog.csv")
     
     ' Integrated Config Controls
     Private pnlMainDashboard As Panel
     Private pnlSettingsView As Panel
-    Private txtCfgModbusIP, txtCfgModbusPort, txtCfgVisionIP, txtCfgVisionPort, txtCfgScannerIP, txtCfgScannerPort, txtCfgCameraUrl, txtCfgProgramNames As TextBox
+    Private txtCfgModbusIP, txtCfgModbusPort, txtCfgVisionIP, txtCfgVisionPort, txtCfgScannerIP, txtCfgScannerPort, txtCfgCameraUrl, txtCfgMasterBarcode, txtCfgProgramNames As TextBox
     Private btnCfgSave, btnCfgCancel As Button
 #End Region
 
@@ -441,17 +454,27 @@ Public Class Form1
             lblClock.Invoke(Sub() lblClock.Text = DateTime.Now.ToString("HH:mm:ss"))
         End If
         
+        blinkCounter += 1
+        If blinkCounter >= 10 Then
+            blinkState = Not blinkState
+            blinkCounter = 0
+        End If
+
         If (modbusClient IsNot Nothing AndAlso modbusClient.Connected) Then
             Try
                 inputs = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
                 
-                If (Not inputs(0)) Or (Not inputs(2)) Or (Not inputs(6) AndAlso currentState <> MachineStatus.IDLE) Then
+                Dim checkCurtain = (currentState = MachineStatus.B1_DISPENSE_START OrElse currentState = MachineStatus.B1_DISPENSE_WAIT)
+                If (Not inputs(0)) Or (Not inputs(2) AndAlso checkCurtain) Or (Not inputs(6) AndAlso currentState <> MachineStatus.IDLE) Then
                     TriggerEmergencyStop("HARDWARE INTERRUPTION DETECTED")
                 End If
 
                 If Not isEStopActive AndAlso Not isPaused Then
                     Await ExecuteStateLogicAsync()
                 End If
+
+                If currentBlinkColor = BlinkColor.YELLOW Then outputs(1) = blinkState
+                If currentBlinkColor = BlinkColor.GREEN Then outputs(2) = blinkState
 
                 outputs(5) = isPaused
                 outputs(6) = isEStopActive 
@@ -484,18 +507,55 @@ Public Class Form1
                 ' Reset outputs except Program select
                 outputs(0) = False : outputs(1) = False : outputs(2) = False
                 outputs(4) = False : outputs(5) = False : outputs(10) = False
+                currentBlinkColor = BlinkColor.NONE
                 If inputs(1) Then currentState = MachineStatus.A1_WAIT_RETRACT
 
             Case MachineStatus.A1_WAIT_RETRACT
                 If inputs(3) Then ' Cylinder Retract Sensor Active
-                    currentState = MachineStatus.A1_REMOVE_PART
+                    currentState = MachineStatus.A1_READY
                 End If
 
-            Case MachineStatus.A1_REMOVE_PART
-                outputs(0) = False ' Red Light Off
-                outputs(2) = True  ' Green Light On
-                ' Wait for Start button to initiate B1 cycle
-                If inputs(1) Then 
+            Case MachineStatus.A1_READY
+                outputs(0) = False ' Red Off
+                outputs(2) = False ' Green Off
+                outputs(1) = True  ' Yellow Light On
+                currentBlinkColor = BlinkColor.NONE
+                currentState = MachineStatus.A1_BARCODE_SCAN
+
+            Case MachineStatus.A1_BARCODE_SCAN
+                Dim barcode = Await SendTcpRequest(config.KeyenceIP, config.KeyencePort, "LON" & vbCr)
+                If Not String.IsNullOrEmpty(barcode) AndAlso Not barcode.Contains("ERROR") Then
+                    barcode = barcode.Trim()
+                    txtScannedModel.Invoke(Sub() txtScannedModel.Text = barcode)
+                    If barcode = config.MasterBarcode Then
+                        currentState = MachineStatus.B1_READY
+                    Else
+                        currentState = MachineStatus.WRONG_MODEL
+                    End If
+                Else
+                    Await Task.Delay(500) ' Wait and retry
+                End If
+
+            Case MachineStatus.WRONG_MODEL
+                outputs(0) = True ' Red Light On
+                outputs(1) = False
+                outputs(2) = False
+                outputs(10) = False ' Cylinder Retract (Unclamp)
+                currentBlinkColor = BlinkColor.NONE
+                
+                isPaused = True
+                MessageBox.Show("Wrong PWBA Model: " & txtScannedModel.Text & vbCrLf & "Expected: " & config.MasterBarcode, "WRONG PWBA", MessageBoxButtons.OK, MessageBoxIcon.Error)
+                isPaused = False
+                txtScannedModel.Invoke(Sub() txtScannedModel.Text = "MODEL: NONE")
+                currentState = MachineStatus.A1_READY
+
+            Case MachineStatus.B1_READY
+                outputs(0) = False 
+                outputs(2) = False
+                currentBlinkColor = BlinkColor.YELLOW ' Yellow blink while waiting for Start
+                
+                If inputs(1) AndAlso inputs(2) Then ' Start pressed AND Curtain sensor active
+                    currentBlinkColor = BlinkColor.NONE
                     cycleStartTime = DateTime.Now
                     currentState = MachineStatus.B1_DISPENSE_START
                 End If
@@ -515,27 +575,30 @@ Public Class Form1
 
             Case MachineStatus.B1_DISPENSE_POST
                 outputs(1) = False ' Yellow Light Off
-                If inputs(2) Then ' Curtain Sensor Clear (DI 02)
-                    isTowerBlinking = True ' Green Light Blink
-                    currentState = MachineStatus.VISION_CHECK
-                End If
+                currentState = MachineStatus.VISION_CHECK
 
             Case MachineStatus.VISION_CHECK
                 Dim vPath = Await SendTcpRequest(config.CognexIP, config.CognexPort, "T" & vbCr)
                 Dim isPass = vPath.Contains("OK") Or inputs(6) ' TCP OK or DI 06
                 
                 If isPass Then
-                    currentState = MachineStatus.FINISH_SUCCESS
+                    currentState = MachineStatus.FINISH_WAIT_ROBOT
+                    robotWaitStart = DateTime.Now
                 Else
                     currentState = MachineStatus.ALARM
                 End If
 
+            Case MachineStatus.FINISH_WAIT_ROBOT
+                currentBlinkColor = BlinkColor.GREEN
+                ' Wait 1.5s for Robot to retreat to Home position 
+                If (DateTime.Now - robotWaitStart).TotalSeconds >= 1.5 Then
+                    currentState = MachineStatus.FINISH_SUCCESS
+                End If
+
             Case MachineStatus.FINISH_SUCCESS
-                isTowerBlinking = False
+                currentBlinkColor = BlinkColor.GREEN
                 outputs(10) = True ' Cylinder Retract & Unclamp (DO 10)
                 If inputs(3) Then  ' Wait for Cylinder Retract Sensor
-                    outputs(2) = True ' Ready Green Light On
-                    
                     Dim duration = (DateTime.Now - cycleStartTime).TotalSeconds
                     Dim model = txtScannedModel.Text
                     Dim ts = DateTime.Now.ToString("HH:mm:ss")
@@ -559,7 +622,7 @@ Public Class Form1
             Case MachineStatus.ALARM
                 outputs(0) = True ' Red On
                 outputs(2) = False
-                isTowerBlinking = False
+                currentBlinkColor = BlinkColor.NONE
                 ' Wait for reset
         End Select
     End Function
@@ -620,15 +683,7 @@ Public Class Form1
         End If
 
         If pnlTowerGreen IsNot Nothing Then
-            If isTowerBlinking Then
-                towerBlinkTick += 1
-                If towerBlinkTick > 5 Then
-                    pnlTowerGreen.BackColor = If(pnlTowerGreen.BackColor = Color.Lime, Color.DarkGreen, Color.Lime)
-                    towerBlinkTick = 0
-                End If
-            Else
-                pnlTowerGreen.BackColor = If(outputs(2), Color.Lime, Color.DarkGreen)
-            End If
+            pnlTowerGreen.BackColor = If(outputs(2), Color.Lime, Color.DarkGreen)
         End If
     End Sub
 
@@ -678,13 +733,22 @@ Public Class Form1
     Private Sub btnStart_Click(sender As Object, e As EventArgs)
         If isEStopActive Then Return
         If isPaused Then : isPaused = False : Return : End If
-        If currentState = MachineStatus.IDLE Or currentState = MachineStatus.ALARM Or currentState = MachineStatus.A1_REMOVE_PART Then
-            currentState = MachineStatus.B1_DISPENSE_START
+        
+        If currentState = MachineStatus.B1_READY Then 
+            If inputs(2) Then ' Curtain sensor check
+                currentBlinkColor = BlinkColor.NONE
+                cycleStartTime = DateTime.Now
+                currentState = MachineStatus.B1_DISPENSE_START
+            Else
+                MessageBox.Show("Curtain Sensor is blocked! Clear curtain to start.", "SAFETY INTERLOCK", MessageBoxButtons.OK, MessageBoxIcon.Warning)
+            End If
+        ElseIf currentState = MachineStatus.IDLE Or currentState = MachineStatus.ALARM Then
+            currentState = MachineStatus.A1_WAIT_RETRACT
         End If
     End Sub
 
     Private Sub btnReset_Click(sender As Object, e As EventArgs)
-        isEStopActive = False : isPaused = False : isTowerBlinking = False
+        isEStopActive = False : isPaused = False : currentBlinkColor = BlinkColor.NONE
         txtScannedModel.Text = "MODEL: NONE" : txtVisionResult.Text = "READY"
         ' Corrected IDLE behavior: Clear outputs and return to A1 sequence
         Array.Clear(outputs, 0, 11)
@@ -716,6 +780,7 @@ Public Class Form1
         txtCfgScannerIP.Text = config.KeyenceIP
         txtCfgScannerPort.Text = config.KeyencePort.ToString()
         txtCfgCameraUrl.Text = config.CameraUrl
+        txtCfgMasterBarcode.Text = config.MasterBarcode
         If config.ProgramNames IsNot Nothing Then
             txtCfgProgramNames.Text = String.Join(vbCrLf, config.ProgramNames)
         End If
@@ -730,6 +795,7 @@ Public Class Form1
             config.KeyenceIP = txtCfgScannerIP.Text
             config.KeyencePort = Integer.Parse(txtCfgScannerPort.Text)
             config.CameraUrl = txtCfgCameraUrl.Text
+            config.MasterBarcode = txtCfgMasterBarcode.Text
             
             Dim lines = txtCfgProgramNames.Text.Split(New String() {vbCrLf, vbCr, vbLf}, StringSplitOptions.RemoveEmptyEntries)
             Dim newProgs As New System.Collections.Generic.List(Of String)
@@ -791,6 +857,9 @@ Public Class Form1
         
         leftFlow.Controls.Add(CreateLabel("Camera Stream URL (MJPEG/JPG):"))
         txtCfgCameraUrl = CreateEdit() : leftFlow.Controls.Add(txtCfgCameraUrl)
+
+        leftFlow.Controls.Add(CreateLabel("Master Barcode (Expected Model):"))
+        txtCfgMasterBarcode = CreateEdit() : leftFlow.Controls.Add(txtCfgMasterBarcode)
 
         rightFlow.Controls.Add(CreateHeader("ROBOT PROGRAMS"))
         rightFlow.Controls.Add(CreateLabel("Enter 15 Program Names (One per line):"))
