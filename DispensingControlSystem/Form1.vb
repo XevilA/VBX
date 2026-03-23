@@ -119,20 +119,19 @@ Public Class Form1
 #End Region
 
 #Region "Machine State Variables"
-    Public Enum MachineStatus
-        IDLE
-        A1_WAIT_RETRACT     ' Wait for Cylinder Retract Sensor (DI 03)
-        A1_READY            ' Ready for new part
-        A1_BARCODE_SCAN     ' Scan barcode
-        WRONG_MODEL         ' Alarm wrong model
-        B1_READY            ' Wait for start & curtain sensor
-        B1_DISPENSE_START   ' Robot Start Output (DO 04)
+    Public    Enum MachineStatus
+        IDLE                ' Green Light ON, Wait Start
+        A1_CLAMPING         ' DO 10 ON, Wait delay
+        A1_BARCODE_SCAN     ' Yellow Light ON, TCP 'LON', Read Barcode
+        A1_MODEL_CONFIRM    ' Wait Start pulse + Check Curtain + Yellow Blink
+        B1_DISPENSE_START   ' DO 04 Pulse
         B1_DISPENSE_WAIT    ' Wait for Robot Complete (DI 04)
-        B1_DISPENSE_POST    ' Yellow Off
-        VISION_CHECK        ' Trigger Vision (TCP or DI 06/07)
-        FINISH_WAIT_ROBOT   ' Wait for Robot Home
-        FINISH_SUCCESS      ' Cylinder Retract & Unclamp (DO 10)
-        ALARM
+        B1_DISPENSE_POST    ' Yellow Off, Green BLINK
+        B1_VISION_CHECK     ' TCP 'T', Read Result
+        B1_FINISH_SUCCESS   ' DO 10 OFF, Wait DI 03 Retract, Green ON, Log data
+        D1_ERROR_PATH       ' Red Light ON, Show Pop, Wait Start
+        A1_RETRACT_PATH     ' DO 10 OFF, Wait DI 03 Retract, Red OFF, Green ON
+        ALARM               ' System Fault
     End Enum
 
     Public Enum BlinkColor
@@ -150,19 +149,55 @@ Public Class Form1
     Private inputs(15) As Boolean
     Private outputs(15) As Boolean
     
-    ' I/O Mapping (Strictly following provided PC I/O table)
-    ' Inputs: 0=E-Stop, 1=Start, 2=Curtain, 3=Retract Sens, 4=Robot Compl, 5=Robot Fail, 6=Vision OK, 7=Vision NG
-    ' Outputs: 0=Red, 1=Yellow, 2=Green, 3=Robot E-Stop, 4=Robot Start, 5=Robot Pause, 6-9=Prog bits, 10=Clamp
+    ' I/O Mapping - AMSAMOTION MT3A-IO1632 (PC I/O Table)
+    ' === INPUTS (DI) ===
+    ' DI 00: E-Stop Safety (NC) - must be HIGH (True) = safe. LOW (False) = E-Stop!
+    ' DI 01: Start Button
+    ' DI 02: Safety Light Curtain (NC) - must be HIGH (True) = clear. LOW = tripped!
+    ' DI 03: Cylinder Retract Sensor (at Home position)
+    ' DI 04: Robot Complete signal
+    ' DI 05: Robot Fault signal
+    ' DI 06: Vision OK (PASS from Cognex)
+    ' DI 07: Vision NG (FAIL from Cognex)
+    ' === OUTPUTS (DO) ===
+    ' DO 00: Tower Light Red  (ALARM / E-Stop)
+    ' DO 01: Tower Light Yellow (Robot in progress)
+    ' DO 02: Tower Light Green  (Ready / Finish)
+    ' DO 03: Robot E-Stop signal (ON = cut power to robot)
+    ' DO 04: Robot Start pulse (500ms)
+    ' DO 05: Robot Pause
+    ' DO 06: Program Select Bit 0 (LSB)
+    ' DO 07: Program Select Bit 1
+    ' DO 08: Program Select Bit 2
+    ' DO 09: Program Select Bit 3 (MSB) — supports up to 15 programs
+    ' DO 10: Cylinder Clamp/Unclamp solenoid
     
     Private isEStopActive As Boolean = False
-    Private isPaused As Boolean = False 
+    Private isPaused As Boolean = False
+    Private isModbusOK As Boolean = False
+    Private isCognexOK As Boolean = False
+    Private isKeyenceOK As Boolean = False
     Private ReadOnly logPath As String = IO.Path.Combine(Application.StartupPath, "ProductionLog.csv")
     
     ' Integrated Config Controls
     Private pnlMainDashboard As Panel
     Private pnlSettingsView As Panel
     Private txtCfgModbusIP, txtCfgModbusPort, txtCfgVisionIP, txtCfgVisionPort, txtCfgScannerIP, txtCfgScannerPort, txtCfgCameraUrl, txtCfgMasterBarcode, txtCfgProgramNames As TextBox
-    Private btnCfgSave, btnCfgCancel As Button
+    Private btnCfgSave, btnCfgCancel, btnCfgScan As Button
+    Private isShowingEStopPopup As Boolean = False
+    Private isTimerBusy As Boolean = False  ' Prevent timer re-entrancy
+
+    ' Simple class to hold LAN scan result (avoids tuple compatibility issues)
+    Private Class DeviceFound
+        Public Property IP As String
+        Public Property DeviceType As String
+        Public Property Port As Integer
+        Public Sub New(ip As String, dtype As String, p As Integer)
+            Me.IP = ip
+            Me.DeviceType = dtype
+            Me.Port = p
+        End Sub
+    End Class
 #End Region
 
 #Region "System Startup & UI Constructor"
@@ -212,6 +247,21 @@ Public Class Form1
         Me.FormBorderStyle = FormBorderStyle.None
         Me.WindowState = FormWindowState.Maximized
         Me.TopMost = True
+        Me.KeyPreview = True
+        AddHandler Me.KeyDown, AddressOf Form1_KeyDown
+        
+        ' Set app icon from logo.jpg if it exists
+        Try
+            Dim logoPath = IO.Path.Combine(Application.StartupPath, "logo.jpg")
+            If Not IO.File.Exists(logoPath) Then
+                logoPath = "C:\Users\Administrator\Documents\VBX\logo.jpg"
+            End If
+            If IO.File.Exists(logoPath) Then
+                Using bmp As New Bitmap(logoPath)
+                    Me.Icon = Icon.FromHandle(bmp.GetHicon())
+                End Using
+            End If
+        Catch : End Try
         Me.Text = "VBX HMI - PRODUCTION SYSTEM"
         Me.Padding = New Padding(10)
 
@@ -366,6 +416,11 @@ Public Class Form1
         
         tmrCamera = New Timer With {.Interval = 500, .Enabled = True}
         AddHandler tmrCamera.Tick, AddressOf tmrCamera_Tick
+        
+        ' Health probe every 5 seconds to check Cognex & Keyence reachability
+        Dim tmrProbe = New Timer With {.Interval = 5000, .Enabled = True}
+        AddHandler tmrProbe.Tick, Sub() ProbeDeviceHealthAsync()
+        
         AddHandler btnStart.Click, AddressOf btnStart_Click
         AddHandler btnReset.Click, AddressOf btnReset_Click
         AddHandler btnPause.Click, AddressOf btnPause_Click
@@ -430,203 +485,313 @@ Public Class Form1
     Private Async Sub UpdateCameraPreviewAsync()
         If picCamera Is Nothing OrElse picCamera.IsDisposed Then Return
         
-        Try
-            Using client As New System.Net.Http.HttpClient()
-                client.Timeout = TimeSpan.FromMilliseconds(500)
-                Dim bytes = Await client.GetByteArrayAsync(config.CameraUrl)
-                If bytes IsNot Nothing AndAlso bytes.Length > 0 Then
-                    Using ms As New IO.MemoryStream(bytes)
-                        Dim img = Image.FromStream(ms)
-                        picCamera.Invoke(Sub() 
-                            If picCamera.Image IsNot Nothing Then picCamera.Image.Dispose()
-                            picCamera.Image = img
-                        End Sub)
-                    End Using
-                End If
-            End Using
-        Catch 
-            ' Silent fail for preview to avoid spamming
-        End Try
+        Dim candidateUrls() As String = {
+            config.CameraUrl,
+            $"http://{config.CognexIP}/snapshot.jpg",
+            $"http://{config.CognexIP}/img/snapshot.jpg",
+            $"http://{config.CognexIP}/insightSS.jpg",
+            $"http://{config.CognexIP}/image.bmp",
+            $"http://{config.CognexIP}/GetBitmap"
+        }
+        
+        For Each url In candidateUrls
+            Try
+                Using client As New System.Net.Http.HttpClient()
+                    client.Timeout = TimeSpan.FromMilliseconds(800)
+                    Dim bytes = Await client.GetByteArrayAsync(url)
+                    If bytes IsNot Nothing AndAlso bytes.Length > 1000 Then  ' > 1KB = real image
+                        Using ms As New IO.MemoryStream(bytes)
+                            Dim img = Image.FromStream(ms)
+                            picCamera.Invoke(Sub()
+                                If picCamera.Image IsNot Nothing Then picCamera.Image.Dispose()
+                                picCamera.Image = img
+                            End Sub)
+                        End Using
+                        ' Update config URL if we found a working one
+                        If url <> config.CameraUrl Then
+                            config.CameraUrl = url
+                            SaveSettings()
+                            Log("Camera URL auto-detected: " & url)
+                        End If
+                        Return  ' Success - stop trying
+                    End If
+                End Using
+            Catch
+                ' Try next URL
+            End Try
+        Next
     End Sub
 
     Private Async Sub tmrMainLoop_Tick(sender As Object, e As EventArgs)
-        If lblClock IsNot Nothing AndAlso lblClock.IsHandleCreated Then
-            lblClock.Invoke(Sub() lblClock.Text = DateTime.Now.ToString("HH:mm:ss"))
-        End If
-        
-        blinkCounter += 1
-        If blinkCounter >= 10 Then
-            blinkState = Not blinkState
-            blinkCounter = 0
-        End If
+        ' Guard against re-entrant async calls
+        If isTimerBusy Then Return
+        isTimerBusy = True
 
-        If (modbusClient IsNot Nothing AndAlso modbusClient.Connected) Then
-            Try
-                inputs = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
-                
-                Dim checkCurtain = (currentState = MachineStatus.B1_DISPENSE_START OrElse currentState = MachineStatus.B1_DISPENSE_WAIT)
-                If (Not inputs(0)) Or (Not inputs(2) AndAlso checkCurtain) Or (Not inputs(6) AndAlso currentState <> MachineStatus.IDLE) Then
-                    TriggerEmergencyStop("HARDWARE INTERRUPTION DETECTED")
-                End If
+        Try
+            If lblClock IsNot Nothing AndAlso lblClock.IsHandleCreated Then
+                lblClock.Text = DateTime.Now.ToString("HH:mm:ss")
+            End If
 
-                If Not isEStopActive AndAlso Not isPaused Then
-                    Await ExecuteStateLogicAsync()
-                End If
+            blinkCounter += 1
+            If blinkCounter >= 10 Then
+                blinkState = Not blinkState
+                blinkCounter = 0
+            End If
 
-                If currentBlinkColor = BlinkColor.YELLOW Then outputs(1) = blinkState
-                If currentBlinkColor = BlinkColor.GREEN Then outputs(2) = blinkState
+            ' ===== MODBUS READ & CONTROL =====
+            isModbusOK = (modbusClient IsNot Nothing AndAlso modbusClient.Connected)
 
-                outputs(5) = isPaused
-                outputs(6) = isEStopActive 
-                
-                ' Apply Program Selection Bitwise (DO 07-10)
-                ApplyProgramBits()
+            If isModbusOK Then
+                Try
+                    inputs = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
 
-                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
-            Catch ex As Exception
-                Log("SCAN FAULT: " & ex.Message)
-            End Try
-        End If
-        RefreshDashboard()
+                    ' --- SAFETY INTERLOCKS (only when NOT already in E-Stop/Alarm) ---
+                    If Not isEStopActive Then
+                        If Not inputs(0) Then
+                            TriggerEmergencyStop("HARDWARE E-STOP ACTIVATED (DI 00)")
+                        End If
+                        Dim robotMoving = (currentState = MachineStatus.B1_DISPENSE_START OrElse
+                                           currentState = MachineStatus.B1_DISPENSE_WAIT)
+                        If robotMoving AndAlso Not inputs(2) Then
+                            TriggerEmergencyStop("CURTAIN SENSOR TRIPPED DURING OPERATION (DI 02)")
+                        End If
+                        If robotMoving AndAlso inputs(5) Then
+                            TriggerEmergencyStop("ROBOT REPORTED FAULT (DI 05)")
+                        End If
+                    End If
+
+                    ' --- STATE MACHINE ---
+                        StepLogic()' Await removed for debug
+
+                    ' --- APPLY BLINK COLORS ---
+                    If currentBlinkColor = BlinkColor.YELLOW Then
+                        outputs(1) = blinkState
+                    ElseIf currentBlinkColor = BlinkColor.GREEN Then
+                        outputs(2) = blinkState
+                    End If
+
+                    outputs(5) = isPaused
+                    ApplyProgramBits()
+                    Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
+
+                Catch ex As Exception
+                    isModbusOK = False
+                    Log("MODBUS FAULT: " & ex.Message)
+                    Task.Run(Sub()
+                        Try : modbusClient.Disconnect() : Catch : End Try
+                        Try
+                            modbusClient = New ModbusClient(config.ModbusIP, config.ModbusPort)
+                            modbusClient.Connect()
+                            Log("MODBUS AUTO-RECONNECT OK")
+                        Catch rex As Exception
+                            Log("MODBUS RECONNECT FAIL: " & rex.Message)
+                        End Try
+                    End Sub)
+                End Try
+            Else
+                Task.Run(Sub()
+                    Try
+                        If modbusClient Is Nothing Then
+                            modbusClient = New ModbusClient(config.ModbusIP, config.ModbusPort)
+                        End If
+                        If Not modbusClient.Connected Then modbusClient.Connect()
+                        isModbusOK = modbusClient.Connected
+                    Catch : End Try
+                End Sub)
+            End If
+
+            RefreshDashboard()
+
+        Catch ex As Exception
+            Log("TIMER FAULT: " & ex.Message)
+        Finally
+            isTimerBusy = False
+        End Try
     End Sub
 
     Private Sub ApplyProgramBits()
         Dim progNum = cmbProgramSelect.SelectedIndex + 1 ' 1-15
-        ' Map 4 bits to DO 07, 08, 09, 10
-        outputs(7) = (progNum And &H1) <> 0
-        outputs(8) = (progNum And &H2) <> 0
-        outputs(9) = (progNum And &H4) <> 0
-        outputs(10) = (progNum And &H8) <> 0
+        ' Per PC I/O table: Program Select Bit 0-3 on DO 06, 07, 08, 09
+        outputs(6)  = (progNum And &H1) <> 0  ' Bit 0 (LSB)
+        outputs(7)  = (progNum And &H2) <> 0  ' Bit 1
+        outputs(8)  = (progNum And &H4) <> 0  ' Bit 2
+        outputs(9)  = (progNum And &H8) <> 0  ' Bit 3 (MSB)
+        ' DO 10 = Cylinder Clamp - managed directly by state machine, never overwritten here
     End Sub
 #End Region
 
-#Region "Core State Machine"
-    Private Async Function ExecuteStateLogicAsync() As Task
+    Private Sub StepLogic()
         Select Case currentState
             Case MachineStatus.IDLE
-                ' Reset outputs except Program select
-                outputs(0) = False : outputs(1) = False : outputs(2) = False
+                ' START: Ready Green Light ON
+                outputs(0) = False : outputs(1) = False : outputs(2) = True
                 outputs(4) = False : outputs(5) = False : outputs(10) = False
                 currentBlinkColor = BlinkColor.NONE
-                If inputs(1) Then currentState = MachineStatus.A1_WAIT_RETRACT
-
-            Case MachineStatus.A1_WAIT_RETRACT
-                If inputs(3) Then ' Cylinder Retract Sensor Active
-                    currentState = MachineStatus.A1_READY
+                ' Place the part on the jig -> Press Start Button (DI 01)
+                If inputs(1) Then 
+                    currentState = MachineStatus.A1_CLAMPING
                 End If
 
-            Case MachineStatus.A1_READY
-                outputs(0) = False ' Red Off
-                outputs(2) = False ' Green Off
-                outputs(1) = True  ' Yellow Light On
-                currentBlinkColor = BlinkColor.NONE
-                currentState = MachineStatus.A1_BARCODE_SCAN
+            Case MachineStatus.A1_CLAMPING
+                ' Clamp cylinder extend and clamp the part (DO 10)
+                outputs(10) = True
+                ' Wait for Cylinder Extend (Assume NC sensor DI 03 goes OFF + 500ms delay)
+                If Not inputs(3) Then
+                    Await Task.Delay(500)
+                    ' Ready Yellow Light ON
+                    outputs(1) = True
+                    currentState = MachineStatus.A1_BARCODE_SCAN
+                End If
 
             Case MachineStatus.A1_BARCODE_SCAN
-                Dim barcode = Await SendTcpRequest(config.KeyenceIP, config.KeyencePort, "LON" & vbCr)
-                If Not String.IsNullOrEmpty(barcode) AndAlso Not barcode.Contains("ERROR") Then
-                    barcode = barcode.Trim()
+                ' Barcode scanner active and record data
+                Dim barcode As String = ""
+                Try
+                    Using client As New System.Net.Sockets.TcpClient()
+                        Dim ct = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
+                        If Await Task.WhenAny(ct, Task.Delay(2000)) IsNot ct Then Throw New Exception("Timeout")
+                        Dim stream = client.GetStream()
+                        Dim lonCmd = System.Text.Encoding.ASCII.GetBytes("LON" & vbCr)
+                        Await stream.WriteAsync(lonCmd, 0, lonCmd.Length)
+                        Await Task.Delay(100)
+                        If stream.DataAvailable Then
+                            Dim ack(63) As Byte : Await stream.ReadAsync(ack, 0, ack.Length)
+                        End If
+                        Dim buf(511) As Byte
+                        Dim deadline = DateTime.Now.AddSeconds(4)
+                        Do While DateTime.Now < deadline
+                            If stream.DataAvailable Then
+                                Dim n = Await stream.ReadAsync(buf, 0, buf.Length)
+                                Dim raw2 = System.Text.Encoding.ASCII.GetString(buf, 0, n)
+                                barcode = New String(raw2.Where(Function(cc) cc >= " "c AndAlso cc <= "~"c).ToArray()).Trim()
+                                If Not String.IsNullOrEmpty(barcode) Then Exit Do
+                            End If
+                            Await Task.Delay(200)
+                        Loop
+                        Dim loffCmd = System.Text.Encoding.ASCII.GetBytes("LOFF" & vbCr)
+                        Await stream.WriteAsync(loffCmd, 0, loffCmd.Length)
+                    End Using
+                Catch ex As Exception
+                    Log("SCANNER READ ERROR")
+                    isKeyenceOK = False
+                End Try
+
+                If Not String.IsNullOrEmpty(barcode) AndAlso barcode <> "ER" Then
+                    isKeyenceOK = True
                     txtScannedModel.Invoke(Sub() txtScannedModel.Text = barcode)
+                    ' Check Model
                     If barcode = config.MasterBarcode Then
-                        currentState = MachineStatus.B1_READY
+                        currentState = MachineStatus.A1_MODEL_CONFIRM
                     Else
-                        currentState = MachineStatus.WRONG_MODEL
+                        Log("MODEL MISMATCH: " & barcode)
+                        currentState = MachineStatus.D1_ERROR_PATH
                     End If
                 Else
-                    Await Task.Delay(500) ' Wait and retry
+                    ' Stay here to retry or error if too many fails? 
+                    ' Flowchart doesn't specify scan retry limit, assuming infinite loop for now
+                    Await Task.Delay(300)
                 End If
 
-            Case MachineStatus.WRONG_MODEL
-                outputs(0) = True ' Red Light On
-                outputs(1) = False
-                outputs(2) = False
-                outputs(10) = False ' Cylinder Retract (Unclamp)
-                currentBlinkColor = BlinkColor.NONE
-                
-                isPaused = True
-                MessageBox.Show("Wrong PWBA Model: " & txtScannedModel.Text & vbCrLf & "Expected: " & config.MasterBarcode, "WRONG PWBA", MessageBoxButtons.OK, MessageBoxIcon.Error)
-                isPaused = False
-                txtScannedModel.Invoke(Sub() txtScannedModel.Text = "MODEL: NONE")
-                currentState = MachineStatus.A1_READY
-
-            Case MachineStatus.B1_READY
-                outputs(0) = False 
-                outputs(2) = False
-                currentBlinkColor = BlinkColor.YELLOW ' Yellow blink while waiting for Start
-                
-                If inputs(1) AndAlso inputs(2) Then ' Start pressed AND Curtain sensor active
-                    currentBlinkColor = BlinkColor.NONE
-                    cycleStartTime = DateTime.Now
-                    currentState = MachineStatus.B1_DISPENSE_START
+            Case MachineStatus.A1_MODEL_CONFIRM
+                ' YES Path: Press Start Button (DI 01) - secondary confirmation
+                ' Visual hint: Yellow Blink
+                currentBlinkColor = BlinkColor.YELLOW
+                If inputs(1) Then
+                    ' Check Curtain Sensor Active (NC = true means clear)
+                    If inputs(2) Then
+                        currentBlinkColor = BlinkColor.NONE
+                        cycleStartTime = DateTime.Now
+                        currentState = MachineStatus.B1_DISPENSE_START
+                    End If
                 End If
 
             Case MachineStatus.B1_DISPENSE_START
-                outputs(1) = True  ' Yellow Light On (In-Process)
-                outputs(4) = True  ' Robot Start Signal (DO 04)
-                Await Task.Delay(500) ' Pulse
+                ' Dispensing program start
+                outputs(1) = True  ' Yellow Light On
+                outputs(4) = True  ' Robot Start pulse
+                Await Task.Delay(500)
                 outputs(4) = False
                 currentState = MachineStatus.B1_DISPENSE_WAIT
 
             Case MachineStatus.B1_DISPENSE_WAIT
-                If inputs(4) Then ' Robot Complete Signal (DI 04)
+                ' Dispense program finish (Robot Complete DI 04)
+                If inputs(4) Then
                     currentState = MachineStatus.B1_DISPENSE_POST
                 End If
-                If inputs(5) Then currentState = MachineStatus.ALARM ' Robot Fail/Fault
+                If inputs(5) Then currentState = MachineStatus.ALARM
 
             Case MachineStatus.B1_DISPENSE_POST
-                outputs(1) = False ' Yellow Light Off
-                currentState = MachineStatus.VISION_CHECK
+                ' Yellow light OFF
+                outputs(1) = False
+                ' Curtain sensor OFF (Normally machine pauses if tripped, but flowchart says "off" then "blink")
+                ' Green light BLINK
+                currentBlinkColor = BlinkColor.GREEN
+                currentState = MachineStatus.B1_VISION_CHECK
 
-            Case MachineStatus.VISION_CHECK
-                Dim vPath = Await SendTcpRequest(config.CognexIP, config.CognexPort, "T" & vbCr)
-                Dim isPass = vPath.Contains("OK") Or inputs(6) ' TCP OK or DI 06
-                
+            Case MachineStatus.B1_VISION_CHECK
+                ' Vision system check
+                Dim vResult = Await SendTcpRequest(config.CognexIP, config.CognexPort, "T" & vbCr)
+                Dim isPass = vResult.Contains("1") OrElse vResult.ToUpper().Contains("OK") OrElse (inputs(6) AndAlso Not inputs(7))
+
                 If isPass Then
-                    currentState = MachineStatus.FINISH_WAIT_ROBOT
-                    robotWaitStart = DateTime.Now
+                    currentBlinkColor = BlinkColor.NONE
+                    txtVisionResult.Invoke(Sub() txtVisionResult.Text = "PASS")
+                    currentState = MachineStatus.B1_FINISH_SUCCESS
                 Else
-                    currentState = MachineStatus.ALARM
+                    currentBlinkColor = BlinkColor.NONE
+                    txtVisionResult.Invoke(Sub() txtVisionResult.Text = "FAIL")
+                    config.FailCount += 1
+                    SaveSettings()
+                    currentState = MachineStatus.D1_ERROR_PATH
                 End If
 
-            Case MachineStatus.FINISH_WAIT_ROBOT
-                currentBlinkColor = BlinkColor.GREEN
-                ' Wait 1.5s for Robot to retreat to Home position 
-                If (DateTime.Now - robotWaitStart).TotalSeconds >= 1.5 Then
-                    currentState = MachineStatus.FINISH_SUCCESS
+            Case MachineStatus.B1_FINISH_SUCCESS
+                ' Cylinder retract and unclamp (automatic)
+                outputs(10) = False
+                ' Cylinder retract sensor active (DI 03)
+                If inputs(3) Then
+                    ' Ready green light on
+                    outputs(2) = True
+                    ' Send data to server/Log
+                    Log("CYCLE SUCCESS: " & txtScannedModel.Text)
+                    cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
+                    config.PassCount += 1
+                    SaveSettings()
+                    currentState = MachineStatus.IDLE
                 End If
 
-            Case MachineStatus.FINISH_SUCCESS
-                currentBlinkColor = BlinkColor.GREEN
-                outputs(10) = True ' Cylinder Retract & Unclamp (DO 10)
-                If inputs(3) Then  ' Wait for Cylinder Retract Sensor
-                    Dim duration = (DateTime.Now - cycleStartTime).TotalSeconds
-                    Dim model = txtScannedModel.Text
-                    Dim ts = DateTime.Now.ToString("HH:mm:ss")
-                    
-                    If lblPassCount IsNot Nothing Then
-                        config.PassCount += 1
-                        SaveSettings()
-                    End If
+            Case MachineStatus.D1_ERROR_PATH
+                ' RED light ON
+                outputs(0) = True
+                outputs(1) = False
+                outputs(2) = False
+                ' Pop up window / Log state
+                ' Press start button (DI 01) to acknowledge
+                If inputs(1) Then
+                    currentState = MachineStatus.A1_RETRACT_PATH
+                End If
 
-                    If dgvHistory IsNot Nothing AndAlso dgvHistory.IsHandleCreated Then
-                        dgvHistory.Invoke(Sub() 
-                            dgvHistory.Rows.Insert(0, ts, model, "PASS")
-                            If dgvHistory.Rows.Count > 50 Then dgvHistory.Rows.RemoveAt(50)
-                        End Sub)
-                    End If
-
-                    LogToCsv(model, "PASS", duration)
+            Case MachineStatus.A1_RETRACT_PATH
+                ' Cylinder retract
+                outputs(10) = False
+                ' Cylinder retract sensor active (DI 03)
+                If inputs(3) Then
+                    ' Red light OFF, Green light ON
+                    outputs(0) = False
+                    outputs(2) = True
+                    ' Remove the part -> Return to C1 (IDLE)
+                    ' Logic: wait for part to be removed? 
+                    ' (If we detect DI 03 active, we are home. We just jump back)
                     currentState = MachineStatus.IDLE
                 End If
 
             Case MachineStatus.ALARM
                 outputs(0) = True ' Red On
-                outputs(2) = False
                 currentBlinkColor = BlinkColor.NONE
-                ' Wait for reset
+                ' Wait for manual reset from UI/HMI (handled in btnReset)
         End Select
     End Function
-# End Region
+#End Region
 
 #Region "Industrial Utils"
     Private Async Function SendTcpRequest(ip As String, port As Integer, cmd As String) As Task(Of String)
@@ -645,13 +810,26 @@ Public Class Form1
     End Function
 
     Private Sub TriggerEmergencyStop(reason As String)
+        ' Guard: only trigger once until reset
+        If isEStopActive OrElse isShowingEStopPopup Then Return
+        
         isEStopActive = True
-        Array.Clear(outputs, 0, 11) ' Reset DO 00-10
-        outputs(0) = True ' Red Light On (DO 00)
-        outputs(3) = True ' Robot Emergency Stop Output (DO 03)
+        isShowingEStopPopup = True
+        currentBlinkColor = BlinkColor.NONE
+        
+        Array.Clear(outputs, 0, 11)
+        outputs(0) = True  ' Red Light On
+        outputs(3) = True  ' Robot E-Stop
         currentState = MachineStatus.ALARM
-        Log("EMERGENCY STOP: " & reason)
-        MessageBox.Show(reason, "SYSTEM SAFETY FAULT", MessageBoxButtons.OK, MessageBoxIcon.Hand)
+        Log("!!! E-STOP: " & reason)
+        
+        Me.Invoke(Sub()
+            Me.TopMost = False
+            MessageBox.Show(reason & vbCrLf & vbCrLf & "Press RESET to resume.",
+                            "SYSTEM SAFETY FAULT", MessageBoxButtons.OK, MessageBoxIcon.Hand)
+            Me.TopMost = True
+            isShowingEStopPopup = False
+        End Sub)
     End Sub
 
     Private Sub RefreshDashboard()
@@ -688,12 +866,36 @@ Public Class Form1
     End Sub
 
     Private Sub UpdateHardwareHealth()
-        If picStatusModbus IsNot Nothing Then 
-            picStatusModbus.BackColor = If(modbusClient IsNot Nothing AndAlso modbusClient.Connected, Color.Lime, Color.Red)
+        ' MODBUS
+        If picStatusModbus IsNot Nothing Then
+            picStatusModbus.BackColor = If(isModbusOK, Color.Lime, Color.Red)
         End If
-        ' Based on table DI 04 (Robot), DI 06/07 (Vision), DI 01 (Scanner)
-        picStatusVision.BackColor = If(inputs(6) OrElse txtVisionResult.Text = "PASS", Color.Lime, Color.Red)
-        picStatusScanner.BackColor = If(txtScannedModel.Text <> "ERROR" AndAlso txtScannedModel.Text <> "MODEL: NONE", Color.Lime, Color.Red)
+        
+        ' COGNEX VISION - based on TCP reachability probe
+        ' Refreshed async in background
+        If picStatusVision IsNot Nothing Then
+            picStatusVision.BackColor = If(isCognexOK, Color.Lime, Color.Red)
+        End If
+        
+        ' KEYENCE SCANNER - based on last scan success
+        If picStatusScanner IsNot Nothing Then
+            picStatusScanner.BackColor = If(isKeyenceOK, Color.Lime, Color.Red)
+        End If
+    End Sub
+
+    Private Async Sub ProbeDeviceHealthAsync()
+        ' Probe Cognex In-Sight: check port 23 (Native/Telnet) OR port 80 (HTTP)
+        ' Camera may only respond on one of these depending on firmware mode
+        Dim cognex23 = PingPortAsync(config.CognexIP, 23, 500)
+        Dim cognex80 = PingPortAsync(config.CognexIP, 80, 500)
+        Await Task.WhenAll(cognex23, cognex80)
+        isCognexOK = cognex23.Result OrElse cognex80.Result
+        
+        ' Probe Keyence: check config port (23 or 9004) also try 9004 as fallback
+        Dim key1 = PingPortAsync(config.KeyenceIP, config.KeyencePort, 500)
+        Dim key2 = PingPortAsync(config.KeyenceIP, 9004, 500)
+        Await Task.WhenAll(key1, key2)
+        isKeyenceOK = key1.Result OrElse key2.Result
     End Sub
 
     Private Sub Log(msg As String)
@@ -867,21 +1069,206 @@ Public Class Form1
         rightFlow.Controls.Add(txtCfgProgramNames)
 
         Dim btnPnl = New FlowLayoutPanel With {.AutoSize = True, .FlowDirection = FlowDirection.LeftToRight}
+        btnCfgScan = CreateIndustrialButton("SCAN LAN DEVICES", Color.DarkCyan, 250, 60)
         btnCfgSave = CreateIndustrialButton("SAVE & APPLY", Color.ForestGreen, 200, 60)
         btnCfgCancel = CreateIndustrialButton("CANCEL", Color.DimGray, 150, 60)
+        
+        AddHandler btnCfgScan.Click, AddressOf btnCfgScan_Click
         AddHandler btnCfgSave.Click, AddressOf btnCfgSave_Click
         AddHandler btnCfgCancel.Click, Sub() 
             pnlSettingsView.Visible = False
             pnlMainDashboard.Visible = True
         End Sub
-        btnPnl.Controls.AddRange({btnCfgSave, btnCfgCancel})
+        btnPnl.Controls.AddRange({btnCfgScan, btnCfgSave, btnCfgCancel})
         rightFlow.Controls.Add(btnPnl)
     End Sub
 
+    Private Async Sub btnCfgScan_Click(sender As Object, e As EventArgs)
+        btnCfgScan.Enabled = False
+        btnCfgScan.Text = "SCANNING..."
+        Log("LAN SCAN STARTED...")
+        
+        Try
+            ' Get local IPv4 address
+            Dim localIPStr As String = "192.168.1."
+            Try
+                Dim hostEntry = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName())
+                For Each addr In hostEntry.AddressList
+                    If addr.AddressFamily = Net.Sockets.AddressFamily.InterNetwork Then
+                        Dim s = addr.ToString()
+                        localIPStr = s.Substring(0, s.LastIndexOf(".") + 1)
+                        Exit For
+                    End If
+                Next
+            Catch : End Try
+            
+            Log("Scanning subnet: " & localIPStr & "1-254")
+            
+            Dim scanTasks As New System.Collections.Generic.List(Of Task(Of DeviceFound))()
+            For i As Integer = 1 To 254
+                Dim ip = localIPStr & i.ToString()
+                scanTasks.Add(CheckDeviceAsync(ip))
+            Next
+            
+            Dim results = Await Task.WhenAll(scanTasks)
+            Dim foundDevices As New System.Collections.Generic.List(Of DeviceFound)()
+            For Each r In results
+                If r IsNot Nothing Then foundDevices.Add(r)
+            Next
+            
+            If foundDevices.Count = 0 Then
+                Me.TopMost = False
+                MessageBox.Show("No hardware devices found on " & localIPStr & "1-254" & vbCrLf & "Make sure devices are powered and on the same network.", "SCAN COMPLETE", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Me.TopMost = True
+            Else
+                Dim msg = "Found " & foundDevices.Count & " device(s):" & vbCrLf & vbCrLf
+                Dim modbusFound As String = Nothing
+                Dim cognexFound As String = Nothing
+                Dim keyenceFound As String = Nothing
+                
+                For Each d In foundDevices
+                    msg &= "  IP: " & d.IP & "  ->  " & d.DeviceType & vbCrLf
+                    If d.DeviceType.Contains("MODBUS") Then modbusFound = d.IP
+                    If d.DeviceType.Contains("COGNEX") Then cognexFound = d.IP
+                    If d.DeviceType.Contains("KEYENCE") Then keyenceFound = d.IP
+                Next
+                
+                ' Auto-fill and auto-connect
+                If modbusFound IsNot Nothing Then
+                    txtCfgModbusIP.Text = modbusFound
+                    config.ModbusIP = modbusFound
+                    ConnectModbus()
+                    msg &= vbCrLf & "[OK] Modbus connected to " & modbusFound
+                End If
+                If cognexFound IsNot Nothing Then
+                    txtCfgVisionIP.Text = cognexFound
+                    config.CognexIP = cognexFound
+                    msg &= vbCrLf & "[OK] Cognex Vision found at " & cognexFound
+                End If
+                If keyenceFound IsNot Nothing Then
+                    txtCfgScannerIP.Text = keyenceFound
+                    config.KeyenceIP = keyenceFound
+                    msg &= vbCrLf & "[OK] Keyence Scanner found at " & keyenceFound
+                End If
+                
+                SaveSettings()
+                
+                Me.TopMost = False
+                MessageBox.Show(msg & vbCrLf & vbCrLf & "Settings auto-saved. Review and click SAVE & APPLY if needed.", "SCAN & CONNECT SUCCESS", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Me.TopMost = True
+            End If
+            
+        Catch ex As Exception
+            Me.TopMost = False
+            MessageBox.Show("Scan Error: " & ex.Message, "SCAN ERROR", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            Me.TopMost = True
+        Finally
+            btnCfgScan.Enabled = True
+            btnCfgScan.Text = "SCAN LAN DEVICES"
+            Log("LAN SCAN COMPLETE.")
+        End Try
+    End Sub
+
+    Private Async Function CheckDeviceAsync(ip As String) As Task(Of DeviceFound)
+        ' Step 1: ICMP Ping first (fast, works even if TCP ports are closed)
+        Dim isAlive = Await Task.Run(Function()
+            Try
+                Dim pinger As New Net.NetworkInformation.Ping()
+                Dim reply = pinger.Send(ip, 200)  ' 200ms timeout
+                Return (reply.Status = Net.NetworkInformation.IPStatus.Success)
+            Catch
+                Return False
+            End Try
+        End Function)
+        
+        If Not isAlive Then Return Nothing
+        
+        ' Step 2: Check known ports on live host
+        ' Modbus TCP I/O -> port 502
+        If Await PingPortAsync(ip, 502, 300) Then Return New DeviceFound(ip, "MODBUS TCP I/O", 502)
+        
+        ' Cognex In-Sight -> port 80 (HTTP/EasyBuilder) or 8080 or 23 (Telnet Native)
+        If Await PingPortAsync(ip, 80, 300) Then Return New DeviceFound(ip, "COGNEX VISION (Port 80)", 80)
+        If Await PingPortAsync(ip, 8080, 300) Then Return New DeviceFound(ip, "COGNEX VISION (Port 8080)", 8080)
+        
+        ' Keyence Barcode -> port 9004 (BL/SR series) or 23 (Telnet)
+        If Await PingPortAsync(ip, 9004, 300) Then Return New DeviceFound(ip, "KEYENCE SCANNER (Port 9004)", 9004)
+        
+        ' Port 23 - could be Cognex or Keyence in Telnet mode
+        If Await PingPortAsync(ip, 23, 300) Then Return New DeviceFound(ip, "KEYENCE/COGNEX Telnet (Port 23)", 23)
+        
+        ' Active but unknown type
+        Return New DeviceFound(ip, "Active Device (Unknown)", 0)
+    End Function
+
+    Private Async Function PingPortAsync(ip As String, port As Integer, timeoutMs As Integer) As Task(Of Boolean)
+        Try
+            Using client As New Net.Sockets.TcpClient()
+                client.ReceiveTimeout = timeoutMs
+                client.SendTimeout = timeoutMs
+                Dim connectTask = client.ConnectAsync(ip, port)
+                If Await Task.WhenAny(connectTask, Task.Delay(timeoutMs)) Is connectTask AndAlso client.Connected Then
+                    Return True
+                End If
+            End Using
+        Catch : End Try
+        Return False
+    End Function
+
     Private Sub btnEStop_Click(sender As Object, e As EventArgs)
-        If MessageBox.Show("CLOSE THE SYSTEM?", "EXIT CONFIRM", MessageBoxButtons.YesNo) = DialogResult.Yes Then
-            Application.Exit()
-        End If
+        ForceExit()
+    End Sub
+
+    ''' <summary>Safe exit: try gracefully, fall back to hard kill</summary>
+    Private Sub ForceExit()
+        Try
+            Me.TopMost = False
+            Dim ans = MessageBox.Show("CLOSE THE SYSTEM?" & vbCrLf & "(Hold Ctrl+Q to force-quit any time)",
+                                      "EXIT CONFIRM", MessageBoxButtons.YesNo, MessageBoxIcon.Question)
+            If ans = DialogResult.Yes Then
+                HardExit()
+            Else
+                Me.TopMost = True
+            End If
+        Catch
+            HardExit()
+        End Try
+    End Sub
+
+    Private Sub HardExit()
+        Try : tmrMainLoop?.Stop() : Catch : End Try
+        Try : tmrCamera?.Stop() : Catch : End Try
+        Try : modbusClient?.Disconnect() : Catch : End Try
+        Environment.Exit(0)
+    End Sub
+
+    Private Sub Form1_KeyDown(sender As Object, e As KeyEventArgs)
+        Select Case e.KeyCode
+            Case Keys.Escape
+                ForceExit()
+            Case Keys.Q
+                If e.Control Then HardExit()  ' Ctrl+Q = immediate hard exit
+        End Select
+    End Sub
+
+    Protected Overrides Sub OnFormClosing(e As System.Windows.Forms.FormClosingEventArgs)
+        HardExit()
+        MyBase.OnFormClosing(e)
+    End Sub
+
+    Private Sub ConnectModbus()
+        Task.Run(Sub()
+            Try
+                If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then
+                    modbusClient.Disconnect()
+                End If
+                modbusClient = New ModbusClient(config.ModbusIP, config.ModbusPort)
+                modbusClient.Connect()
+                Log("Modbus reconnected to: " & config.ModbusIP)
+            Catch ex As Exception
+                Log("Modbus reconnect failed: " & ex.Message)
+            End Try
+        End Sub)
     End Sub
 #End Region
 
