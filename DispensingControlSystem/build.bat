@@ -13,6 +13,9 @@ set "OUT=%~dp0Output\Standalone\win-x64"
 set "RID=win-x64"
 
 echo [1/3] Cleaning previous build...
+echo        Stopping running instances...
+taskkill /f /im DispensingControlSystem.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
 if exist "%OUT%" rmdir /s /q "%OUT%"
 
 echo [2/3] Publishing self-contained single-file EXE...
