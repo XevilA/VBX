@@ -89,6 +89,7 @@ Partial Class Form1
         MODEL_CHECK         ' Barcode match decision
         MODEL_FAIL          ' Red ON — wrong PWBA popup
         MODEL_FAIL_RETRACT  ' Cylinder retract after wrong model
+        WAIT_START_CONFIRM  ' Green blink — wait operator press Start to run robot
         CURTAIN_CHECK       ' Verify safety curtain
         DISPENSE_START      ' Send program bits + robot start
         DISPENSE_RUNNING    ' Wait robot complete — yellow blink
@@ -260,7 +261,8 @@ Partial Class Form1
                     ' Match or wildcard → proceed to dispensing
                     Log("VERIFY", $"✓ Model Match: {lastBarcode}")
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
-                    currentState = MachineStatus.CURTAIN_CHECK
+                    Log("SYSTEM", "▶ Press START to run dispensing program")
+                    currentState = MachineStatus.WAIT_START_CONFIRM
                 Else
                     ' NG: Red light, popup, wait Start to retract
                     alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
@@ -298,6 +300,18 @@ Partial Class Form1
                     LogClampIO("✓ Retracted (MODEL_FAIL)")
                     config.FailCount += 1 : SaveSettings()
                     currentState = MachineStatus.IDLE
+                End If
+
+            ' ── WAIT_START_CONFIRM: Barcode OK, wait 2nd Start press to run robot ──
+            Case MachineStatus.WAIT_START_CONFIRM
+                ' Keep clamp locked
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
+                ' Green blink = ready for operator confirmation
+                outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
+                outputs(DO_LIGHT_YEL) = False
+                If triggerStart Then
+                    Log("CYCLE", "▶ Operator confirmed — Starting dispensing")
+                    currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
             ' ── CURTAIN_CHECK: Safety curtain must be active ──
