@@ -41,20 +41,60 @@ Partial Class Form1
     Private cycleStartTime As DateTime
 #End Region
 
+#Region "I/O Mapping (per Hardware I/O Table)"
+    ' ── INPUTS (Discrete Inputs from Modbus) ──
+    Private Const DI_ESTOP As Integer = 0        ' I0.0  Emergency Stop (NC)
+    Private Const DI_START As Integer = 1         ' I0.1  Start Button
+    Private Const DI_START2 As Integer = 2        ' I0.2  Start Button (2)
+    Private Const DI_CURTAIN As Integer = 3       ' I0.3  Safety Light Curtain KEYENCE (NC)
+    Private Const DI_ROBOT_RUN As Integer = 4     ' I0.4  Robot JR3403F Running
+    Private Const DI_ROBOT_DONE As Integer = 5    ' I0.5  Robot JR3403F Complete
+    Private Const DI_ROBOT_FAULT As Integer = 6   ' I0.6  Robot JR3403F Fault
+    Private Const DI_VISION_OK As Integer = 7     ' I0.7  Cognex In-Sight 2800 OK
+    Private Const DI_VISION_NG As Integer = 8     ' I1.0  Cognex In-Sight 2800 NG
+    Private Const DI_CYL_EXT As Integer = 9       ' I1.1  Cylinder Extend Sensor
+    Private Const DI_CYL_EXT2 As Integer = 10     ' I1.2  Cylinder Extend Sensor 2
+    Private Const DI_CYL_RET As Integer = 11      ' I1.3  Cylinder Retract Sensor
+    Private Const DI_CYL_RET2 As Integer = 12     ' I1.4  Cylinder Retract Sensor 2
+
+    ' ── OUTPUTS (Coils to Modbus) ──
+    Private Const DO_LIGHT_RED As Integer = 0     ' Q0.0  Tower Light Red
+    Private Const DO_LIGHT_YEL As Integer = 1     ' Q0.1  Tower Light Yellow
+    Private Const DO_LIGHT_GRN As Integer = 2     ' Q0.2  Tower Light Green
+    ' Q0.3 reserved
+    Private Const DO_ROBOT_ESTOP As Integer = 4   ' Q0.4  Robot Emergency Signal
+    Private Const DO_ROBOT_START As Integer = 5   ' Q0.5  Robot Start Signal
+    Private Const DO_ROBOT_PAUSE As Integer = 6   ' Q0.6  Robot Pause Signal
+    Private Const DO_PROG_LOAD As Integer = 7     ' Q0.7  Program Number LOAD
+    Private Const DO_PROG_BIT0 As Integer = 8     ' Q1.0  Program bit0 (2^0=1)
+    Private Const DO_PROG_BIT1 As Integer = 9     ' Q1.1  Program bit1 (2^1=2)
+    Private Const DO_PROG_BIT2 As Integer = 10    ' Q1.2  Program bit2 (2^2=4)
+    Private Const DO_PROG_BIT3 As Integer = 11    ' Q1.3  Program bit3 (2^3=8)
+    Private Const DO_CLAMP As Integer = 12        ' Q1.4  Cylinder Clamp
+    Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Clamp 2
+    Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  Cylinder Clamp 3
+    Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Clamp 4
+#End Region
+
 #Region "Machine State System"
     Public Enum MachineStatus
-        IDLE
-        INIT_BUSY
-        SCAN_READY
-        SCAN_BUSY
-        MODEL_VERIFY
-        PROCESS_START
-        PROCESS_RUNNING
-        PROCESS_FINISH
-        INSPECTION_BUSY
-        CYCLE_COMPLETE
-        FAULT_ALARM
-        EMERGENCY_STOP
+        IDLE                ' Green ON — wait for Start
+        CLAMP_EXTEND        ' Cylinder clamp — wait extend sensor
+        SCANNING            ' Yellow ON — barcode scan
+        MODEL_CHECK         ' Barcode match decision
+        MODEL_FAIL          ' Red ON — wrong PWBA popup
+        MODEL_FAIL_RETRACT  ' Cylinder retract after wrong model
+        CURTAIN_CHECK       ' Verify safety curtain
+        DISPENSE_START      ' Send program bits + robot start
+        DISPENSE_RUNNING    ' Wait robot complete — yellow blink
+        DISPENSE_DONE       ' Yellow OFF — green blink
+        VISION_CHECK        ' Trigger vision inspection
+        VISION_OK_RETRACT   ' Unclamp + retract after PASS
+        VISION_NG           ' Red ON — NG error
+        VISION_NG_RETRACT   ' Retract after NG
+        CYCLE_COMPLETE      ' Green ON — send data — finish
+        FAULT_ALARM         ' Generic fault
+        EMERGENCY_STOP      ' E-Stop active
     End Enum
 
     Private currentState As MachineStatus = MachineStatus.IDLE
@@ -109,18 +149,18 @@ Partial Class Form1
     Private doLeds(15) As Panel
 #End Region
 
-#Region "Core Machine Logic"
+#Region "Core Machine Logic — ViscoTec Flowchart"
     Private Async Function RunWorkflowAsync() As Task
-        Dim triggerStart = isSoftwareStartRequested OrElse (inputs(1) AndAlso Not inputs(0))
+        Dim triggerStart = isSoftwareStartRequested OrElse inputs(DI_START) OrElse inputs(DI_START2)
         Dim triggerReset = isSoftwareResetRequested
         isSoftwareStartRequested = False
         isSoftwareResetRequested = False
 
-        ' Global Safety: DI 00 (NC) and DI 02 (Light Curtain NC)
-        If Not inputs(0) Then
+        ' ── Global Safety: E-Stop (NC — must be HIGH) ──
+        If Not inputs(DI_ESTOP) Then
             currentState = MachineStatus.EMERGENCY_STOP
             isEStopActive = True
-            alarmMessage = "EMERGENCY STOP — DI-00 Safety Circuit Open"
+            alarmMessage = "EMERGENCY STOP — I0.0 Safety Circuit Open"
         End If
 
         If triggerReset Then
@@ -133,113 +173,217 @@ Partial Class Form1
         End If
 
         If currentState = MachineStatus.EMERGENCY_STOP Then
-            outputs(0) = True : outputs(3) = True
-            Log("E-STOP", alarmMessage)
+            outputs(DO_LIGHT_RED) = True
+            outputs(DO_ROBOT_ESTOP) = True   ' Q0.4 Robot emergency
+            outputs(DO_LIGHT_GRN) = False
+            outputs(DO_LIGHT_YEL) = False
             Return
         End If
 
         Select Case currentState
+            ' ── IDLE: Green ON, wait Start ──
             Case MachineStatus.IDLE
                 ResetOutputs()
-                outputs(2) = True
+                outputs(DO_LIGHT_GRN) = True        ' Green = Ready
                 If triggerStart Then
-                    currentState = MachineStatus.INIT_BUSY
                     cycleStartTime = DateTime.Now
-                    Log("CYCLE", "▶ Production Cycle Started")
+                    ' Activate cylinder clamp
+                    outputs(DO_CLAMP) = True
+                    outputs(DO_CLAMP2) = True
+                    outputs(DO_CLAMP3) = True
+                    outputs(DO_CLAMP4) = True
+                    Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
+                    currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-            Case MachineStatus.INIT_BUSY
-                outputs(2) = False : outputs(10) = True
-                Await Task.Delay(800)
-                If inputs(3) Then
-                    currentState = MachineStatus.SCAN_BUSY
-                Else
-                    alarmMessage = "Cylinder Sensor Timeout (DI-03)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
+            ' ── CLAMP_EXTEND: Wait cylinder extend sensor ──
+            Case MachineStatus.CLAMP_EXTEND
+                outputs(DO_LIGHT_GRN) = False
+                If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
+                    outputs(DO_LIGHT_YEL) = True     ' Yellow = Busy
+                    Log("CLAMP", "✓ Cylinder Extended — Scanning Barcode")
+                    currentState = MachineStatus.SCANNING
                 End If
 
-            Case MachineStatus.SCAN_BUSY
+            ' ── SCANNING: Barcode scan via Keyence Ethernet ──
+            Case MachineStatus.SCANNING
                 Log("SCAN", "Acquiring Barcode...")
                 Dim barcode = Await ReadBarcodeAsync()
                 If Not String.IsNullOrEmpty(barcode) AndAlso barcode <> "ERROR" AndAlso barcode <> "ER" AndAlso barcode <> "TIMEOUT" Then
                     lastBarcode = barcode
                     isScannerLive = True
-                    currentState = MachineStatus.MODEL_VERIFY
+                    Log("SCAN", $"Barcode: {barcode}")
+                    currentState = MachineStatus.MODEL_CHECK
                 Else
                     isScannerLive = False
-                    Log("SCAN", "Barcode Read Failed — Retrying...")
+                    Log("SCAN", "Read Failed — Retrying...")
                     Await Task.Delay(500)
                 End If
 
-            Case MachineStatus.MODEL_VERIFY
+            ' ── MODEL_CHECK: Match barcode ──
+            Case MachineStatus.MODEL_CHECK
                 If lastBarcode = config.MasterBarcode OrElse config.MasterBarcode = "*" Then
                     Log("VERIFY", $"✓ Model Match: {lastBarcode}")
-                    currentState = MachineStatus.PROCESS_START
+                    currentState = MachineStatus.CURTAIN_CHECK
                 Else
-                    alarmMessage = $"Model Mismatch! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
+                    alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
                     Log("VERIFY", $"✗ {alarmMessage}")
+                    currentState = MachineStatus.MODEL_FAIL
+                End If
+
+            ' ── MODEL_FAIL: Red ON, popup wrong PWBA ──
+            Case MachineStatus.MODEL_FAIL
+                outputs(DO_LIGHT_RED) = True
+                outputs(DO_LIGHT_YEL) = False
+                outputs(DO_LIGHT_GRN) = False
+                ' Wait for operator press Start to acknowledge
+                If triggerStart Then
+                    Log("SYSTEM", "Operator acknowledged — Retracting")
+                    outputs(DO_CLAMP) = False
+                    outputs(DO_CLAMP2) = False
+                    outputs(DO_CLAMP3) = False
+                    outputs(DO_CLAMP4) = False
+                    currentState = MachineStatus.MODEL_FAIL_RETRACT
+                End If
+
+            ' ── MODEL_FAIL_RETRACT: Wait retract then IDLE ──
+            Case MachineStatus.MODEL_FAIL_RETRACT
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                    outputs(DO_LIGHT_RED) = False
+                    outputs(DO_LIGHT_GRN) = True
+                    alarmMessage = ""
+                    Log("CLAMP", "✓ Retracted — Remove Part")
+                    config.FailCount += 1 : SaveSettings()
+                    currentState = MachineStatus.IDLE
+                End If
+
+            ' ── CURTAIN_CHECK: Safety curtain must be active ──
+            Case MachineStatus.CURTAIN_CHECK
+                If inputs(DI_CURTAIN) Then
+                    Log("SAFETY", "✓ Light Curtain Active")
+                    currentState = MachineStatus.DISPENSE_START
+                Else
+                    alarmMessage = "Safety Light Curtain NOT Active (I0.3)"
+                    Log("SAFETY", alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            Case MachineStatus.PROCESS_START
-                outputs(1) = True
+            ' ── DISPENSE_START: Send program + robot start ──
+            Case MachineStatus.DISPENSE_START
+                outputs(DO_LIGHT_YEL) = True
                 UpdateProgramBits()
-                outputs(4) = True
+                outputs(DO_PROG_LOAD) = True         ' Q0.7 LOAD
+                Await Task.Delay(200)
+                outputs(DO_ROBOT_START) = True       ' Q0.5 Robot Start pulse
                 Await Task.Delay(500)
-                outputs(4) = False
-                currentState = MachineStatus.PROCESS_RUNNING
+                outputs(DO_ROBOT_START) = False
+                Log("ROBOT", $"▶ Dispensing Program {cbProgramSelect.SelectedIndex + 1} Started")
+                currentState = MachineStatus.DISPENSE_RUNNING
 
-            Case MachineStatus.PROCESS_RUNNING
-                ' Check light curtain during operation
-                If Not inputs(2) Then
-                    alarmMessage = "Safety Light Curtain Interrupted (DI-02)"
+            ' ── DISPENSE_RUNNING: Wait robot complete ──
+            Case MachineStatus.DISPENSE_RUNNING
+                ' Safety: check curtain during dispensing
+                If Not inputs(DI_CURTAIN) Then
+                    alarmMessage = "Light Curtain Interrupted During Dispensing!"
                     Log("SAFETY", alarmMessage)
-                    outputs(5) = True ' Robot pause
+                    outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause robot
                     currentState = MachineStatus.EMERGENCY_STOP
                     Return
                 End If
-                If inputs(4) Then
-                    currentState = MachineStatus.INSPECTION_BUSY
-                ElseIf inputs(5) Then
-                    alarmMessage = "Robot Internal Fault (DI-05)"
+                ' Yellow blink effect
+                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2)
+                If inputs(DI_ROBOT_DONE) Then         ' I0.5 Robot Complete
+                    Log("ROBOT", "✓ Dispensing Complete")
+                    outputs(DO_LIGHT_YEL) = False
+                    outputs(DO_PROG_LOAD) = False
+                    currentState = MachineStatus.DISPENSE_DONE
+                ElseIf inputs(DI_ROBOT_FAULT) Then    ' I0.6 Robot Fault
+                    alarmMessage = "Robot Fault Signal (I0.6)"
                     Log("FAULT", alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            Case MachineStatus.INSPECTION_BUSY
+            ' ── DISPENSE_DONE: Green blink then vision ──
+            Case MachineStatus.DISPENSE_DONE
+                outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
+                Await Task.Delay(800)
+                currentState = MachineStatus.VISION_CHECK
+
+            ' ── VISION_CHECK: Trigger Cognex inspection ──
+            Case MachineStatus.VISION_CHECK
                 Log("VISION", "Triggering Cognex Inspection...")
                 Dim result = Await SendTcpHandshakeAsync(config.CognexIP, config.CognexPort, "T" & vbCr)
                 lastVisionResult = result
-
-                Dim isPassed = result.ToUpper().Contains("OK") OrElse result.Contains("1") OrElse inputs(6)
-                Dim isFailed = inputs(7) ' DI-07 Vision NG
-
-                If isPassed AndAlso Not isFailed Then
+                ' Check I/O signals + TCP response
+                Dim isOK = inputs(DI_VISION_OK) OrElse result.ToUpper().Contains("OK") OrElse result.Contains("1")
+                Dim isNG = inputs(DI_VISION_NG)
+                If isOK AndAlso Not isNG Then
                     Log("VISION", "✓ Inspection PASSED")
                     lastVisionResult = "PASS"
-                    config.PassCount += 1
-                    currentState = MachineStatus.CYCLE_COMPLETE
+                    config.PassCount += 1 : SaveSettings()
+                    ' Auto unclamp + retract
+                    outputs(DO_CLAMP) = False
+                    outputs(DO_CLAMP2) = False
+                    outputs(DO_CLAMP3) = False
+                    outputs(DO_CLAMP4) = False
+                    currentState = MachineStatus.VISION_OK_RETRACT
                 Else
                     Log("VISION", "✗ Inspection FAILED")
                     lastVisionResult = "FAIL"
-                    config.FailCount += 1
-                    currentState = MachineStatus.FAULT_ALARM
-                    alarmMessage = "Vision Inspection Failed"
+                    config.FailCount += 1 : SaveSettings()
+                    currentState = MachineStatus.VISION_NG
                 End If
-                SaveSettings()
 
-            Case MachineStatus.CYCLE_COMPLETE
-                outputs(10) = False
-                If Not inputs(3) Then
+            ' ── VISION_OK_RETRACT: Wait retract → complete ──
+            Case MachineStatus.VISION_OK_RETRACT
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                    outputs(DO_LIGHT_GRN) = True
                     cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
                     Log("CYCLE", $"✓ Cycle Complete ({cycleDuration:F2}s)")
+                    currentState = MachineStatus.CYCLE_COMPLETE
+                End If
+
+            ' ── VISION_NG: Red ON, wait acknowledge ──
+            Case MachineStatus.VISION_NG
+                outputs(DO_LIGHT_RED) = True
+                outputs(DO_LIGHT_GRN) = False
+                alarmMessage = "Vision Inspection FAILED — NG"
+                If triggerStart Then
+                    Log("SYSTEM", "Operator acknowledged NG — Retracting")
+                    outputs(DO_CLAMP) = False
+                    outputs(DO_CLAMP2) = False
+                    outputs(DO_CLAMP3) = False
+                    outputs(DO_CLAMP4) = False
+                    currentState = MachineStatus.VISION_NG_RETRACT
+                End If
+
+            ' ── VISION_NG_RETRACT: Retract then IDLE ──
+            Case MachineStatus.VISION_NG_RETRACT
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                    outputs(DO_LIGHT_RED) = False
+                    outputs(DO_LIGHT_GRN) = True
+                    alarmMessage = ""
+                    Log("CLAMP", "✓ Retracted — Remove NG Part")
                     currentState = MachineStatus.IDLE
                 End If
 
+            ' ── CYCLE_COMPLETE: Green ON → IDLE ──
+            Case MachineStatus.CYCLE_COMPLETE
+                outputs(DO_LIGHT_GRN) = True
+                Log("DATA", "Sending data to server...")
+                ' TODO: server data upload here
+                Await Task.Delay(500)
+                currentState = MachineStatus.IDLE
+
+            ' ── FAULT_ALARM: Generic fault ──
             Case MachineStatus.FAULT_ALARM
-                outputs(0) = True : outputs(1) = False : outputs(2) = False
-                If triggerReset Then currentState = MachineStatus.IDLE
+                outputs(DO_LIGHT_RED) = True
+                outputs(DO_LIGHT_YEL) = False
+                outputs(DO_LIGHT_GRN) = False
+                If triggerReset Then
+                    alarmMessage = ""
+                    currentState = MachineStatus.IDLE
+                End If
         End Select
     End Function
 #End Region
@@ -302,10 +446,10 @@ Partial Class Form1
 
     Private Sub UpdateProgramBits()
         Dim progNum = cbProgramSelect.SelectedIndex + 1
-        outputs(6) = (progNum And 1) <> 0
-        outputs(7) = (progNum And 2) <> 0
-        outputs(8) = (progNum And 4) <> 0
-        outputs(9) = (progNum And 8) <> 0
+        outputs(DO_PROG_BIT0) = (progNum And 1) <> 0   ' Q1.0
+        outputs(DO_PROG_BIT1) = (progNum And 2) <> 0   ' Q1.1
+        outputs(DO_PROG_BIT2) = (progNum And 4) <> 0   ' Q1.2
+        outputs(DO_PROG_BIT3) = (progNum And 8) <> 0   ' Q1.3
     End Sub
 
     ''' <summary>
@@ -792,11 +936,11 @@ Partial Class Form1
         ' State Badge
         lblStateText.Text = currentState.ToString().Replace("_", " ")
         Select Case currentState
-            Case MachineStatus.IDLE
+            Case MachineStatus.IDLE, MachineStatus.CYCLE_COMPLETE
                 lblStateText.ForeColor = CLR_PASS : lblStateText.BackColor = Color.FromArgb(20, 52, 199, 89)
-            Case MachineStatus.FAULT_ALARM, MachineStatus.EMERGENCY_STOP
+            Case MachineStatus.FAULT_ALARM, MachineStatus.EMERGENCY_STOP, MachineStatus.MODEL_FAIL, MachineStatus.VISION_NG
                 lblStateText.ForeColor = Color.White : lblStateText.BackColor = If(animPulse < 10, Color.FromArgb(180, 0, 0), Color.FromArgb(100, 0, 0))
-            Case MachineStatus.PROCESS_RUNNING
+            Case MachineStatus.DISPENSE_RUNNING, MachineStatus.DISPENSE_START
                 lblStateText.ForeColor = CLR_WARN : lblStateText.BackColor = Color.FromArgb(40, 255, 149, 0)
             Case Else
                 lblStateText.ForeColor = CLR_TEXT : lblStateText.BackColor = Color.FromArgb(36, 38, 44)
