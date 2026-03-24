@@ -34,7 +34,7 @@ Partial Class Form1
         Public Property FailCount As Integer = 0
         Public Property CameraUrl As String = "http://192.168.1.20/cam0/img/listIds"  ' Cognex In-Sight 2800 API (auto-detect)
         Public Property CameraSourcePath As String = ""  ' FTP or local file path (leave empty = use CameraUrl HTTP)
-        Public Property MasterBarcode As String = "VBX-001"
+        Public Property MasterBarcode As String = "*"   ' "*" = accept all, or set specific barcode to filter
         Public Property DebugLogEnabled As Boolean = True
         Public Property ProgramNames As String() = Enumerable.Range(1, 15).Select(Function(i) $"PROGRAM {i:D2}").ToArray()
     End Class
@@ -227,20 +227,19 @@ Partial Class Form1
                     Await Task.Delay(500)
                 End If
 
-            ' ── MODEL_CHECK: Map barcode → program ──
+            ' ── MODEL_CHECK: Flowchart Phase 3 ─ Check barcode vs Master ──
             Case MachineStatus.MODEL_CHECK
-                ' If MasterBarcode is "*" or matches, proceed
-                ' Otherwise, barcode IS the identifier — just accept it and proceed
-                If config.MasterBarcode = "*" OrElse lastBarcode = config.MasterBarcode OrElse config.MasterBarcode = "" Then
+                If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
+                    ' Match or wildcard → proceed to dispensing
                     Log("VERIFY", $"✓ Model Match: {lastBarcode}")
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     currentState = MachineStatus.CURTAIN_CHECK
                 Else
-                    ' Accept ANY barcode — just use it as model ID and proceed
-                    ' The barcode identifies the part, not a specific "master" code
-                    Log("VERIFY", $"✓ Barcode Accepted: {lastBarcode} (Program: {cbProgramSelect.SelectedIndex + 1})")
-                    AddScanHistory(lastBarcode, "✓ ACCEPTED")
-                    currentState = MachineStatus.CURTAIN_CHECK
+                    ' NG: Red light (Q0.0), popup, wait Start to retract
+                    alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
+                    Log("VERIFY", $"✗ {alarmMessage}")
+                    AddScanHistory(lastBarcode, "❌ REJECT")
+                    currentState = MachineStatus.MODEL_FAIL
                 End If
 
             ' ── MODEL_FAIL: Red ON, popup wrong PWBA ──
@@ -1544,7 +1543,11 @@ Partial Class Form1
 
     Private Sub LoadSettings()
         Try
-            If Not IO.File.Exists(configPath) Then Return
+            If Not IO.File.Exists(configPath) Then
+                ' First run — create config with defaults
+                SaveSettings()
+                Return
+            End If
             For Each line In IO.File.ReadAllLines(configPath)
                 Dim trimmed = line.Trim()
                 If String.IsNullOrEmpty(trimmed) OrElse trimmed.StartsWith("#") OrElse trimmed.StartsWith("[") Then Continue For
@@ -1567,6 +1570,8 @@ Partial Class Form1
                     Case "DebugLogEnabled" : Boolean.TryParse(val, config.DebugLogEnabled)
                 End Select
             Next
+            ' Auto-save to update config file with any new/missing keys
+            SaveSettings()
         Catch ex As Exception
             DebugLog($"CONFIG-LOAD-ERR: {ex.Message}")
         End Try
