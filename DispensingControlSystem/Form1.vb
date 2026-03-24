@@ -560,8 +560,11 @@ Partial Class Form1
         Dim doStatus = $"DO[Q1.4={If(outputs(DO_CLAMP), "ON", "off")} Q1.5={If(outputs(DO_CLAMP2), "ON", "off")} Q1.6={If(outputs(DO_CLAMP3), "ON", "off")} Q1.7={If(outputs(DO_CLAMP4), "ON", "off")}]"
         Dim diStatus = $"DI[I1.1={If(inputs(DI_CYL_EXT), "ON", "off")} I1.2={If(inputs(DI_CYL_RET), "ON", "off")} I1.3={If(inputs(DI_CYL_EXT2), "ON", "off")} I1.4={If(inputs(DI_CYL_RET2), "ON", "off")}]"
         Dim startStatus = $"START[I0.1={If(inputs(DI_START), "ON", "off")} I0.2={If(inputs(DI_START2), "ON", "off")}]"
+        ' Full detail to debug log file
         DebugLog($"CLAMP-IO: {action} | {doStatus} | {diStatus} | {startStatus} | State={currentState}")
-        Log("CLAMP", $"{action} | {doStatus}")
+        ' Full detail to HMI console
+        Log("CLAMP", $"{action}")
+        Log("IO", $"{doStatus} {diStatus} {startStatus}")
     End Sub
 
     Private Sub UpdateProgramBits()
