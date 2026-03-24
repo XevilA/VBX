@@ -156,8 +156,8 @@ Partial Class Form1
 #End Region
 
 #Region "Core Machine Logic — ViscoTec Flowchart"
-    Private Async Function RunWorkflowAsync() As Task
-        Dim triggerStart = isSoftwareStartRequested OrElse inputs(DI_START) OrElse inputs(DI_START2)
+    Private Async Function RunWorkflowAsync() As Task        ' Both physical Start buttons must be pressed together (safety two-hand control)
+        Dim triggerStart = isSoftwareStartRequested OrElse (inputs(DI_START) AndAlso inputs(DI_START2))
 
         Dim triggerReset = isSoftwareResetRequested
         isSoftwareStartRequested = False
