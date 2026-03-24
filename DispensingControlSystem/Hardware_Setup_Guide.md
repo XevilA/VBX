@@ -12,7 +12,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **ETH-MODBUS-IO16R** | I/O Controller (16DI/16DO) | `192.168.1.12` | `502` | Modbus TCP |
 | **Cognex In-Sight 2800** | Vision System (กล้อง) | `192.168.1.20` | `80` | TCP / HTTP |
-| **Keyence Barcode Scanner** | สแกนเนอร์บาร์โค้ด | `192.168.1.54` | `23` | TCP / Telnet |
+| **Keyence Barcode Scanner** | สแกนเนอร์บาร์โค้ด | `192.168.1.54` | `9004` | TCP |
 
 > **หมายเหตุสำหรับกล้อง:** การแสดงผลภาพสดดึงผ่าน HTTP จาก URL: `http://192.168.1.20/img/snapshot.jpg`
 > รองรับ FTP (`ftp://ip/path`), TCP (`tcp://ip:port`), และ File Path (`C:\path\image.jpg`)

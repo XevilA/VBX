@@ -21,7 +21,7 @@ Partial Class Form1
     Private Const DEFAULT_COGNEX_IP As String = "192.168.1.20"
     Private Const DEFAULT_COGNEX_PORT As Integer = 80
     Private Const DEFAULT_KEYENCE_IP As String = "192.168.1.54"
-    Private Const DEFAULT_KEYENCE_PORT As Integer = 23
+    Private Const DEFAULT_KEYENCE_PORT As Integer = 9004
 
     Public Class AppConfig
         Public Property ModbusIP As String = DEFAULT_MODBUS_IP
@@ -32,7 +32,7 @@ Partial Class Form1
         Public Property KeyencePort As Integer = DEFAULT_KEYENCE_PORT
         Public Property PassCount As Integer = 0
         Public Property FailCount As Integer = 0
-        Public Property CameraUrl As String = "http://192.168.1.20/img/snapshot.jpg"
+        Public Property CameraUrl As String = "http://192.168.1.20/cam0/img/listIds"  ' Cognex In-Sight 2800 API (auto-detect)
         Public Property CameraSourcePath As String = ""  ' FTP or local file path (leave empty = use CameraUrl HTTP)
         Public Property MasterBarcode As String = "VBX-001"
         Public Property DebugLogEnabled As Boolean = True
@@ -40,7 +40,7 @@ Partial Class Form1
     End Class
 
     Private config As New AppConfig()
-    Private ReadOnly configPath As String = IO.Path.Combine(Application.StartupPath, "settings.config.json")
+    Private ReadOnly configPath As String = IO.Path.Combine(Application.StartupPath, "vbx_config.ini")
     Private ReadOnly logDir As String = IO.Path.Combine(Application.StartupPath, "logs")
     Private logWriter As IO.StreamWriter
     Private cycleStartTime As DateTime
@@ -136,7 +136,7 @@ Partial Class Form1
     Private picCameraPreview As PictureBox
     Private pnlCameraOverlay As Panel
     Private lblCameraStatus, lblVisionOverlay As Label
-    Private btnStart, btnReset, btnPause, btnConfig, btnExit As Button
+    Private btnStart, btnReset, btnPause, btnConfig, btnExport, btnExit As Button
     Private indModbus, indVision, indScanner As Panel
     Private lblIndModbus, lblIndVision, lblIndScanner As Label
     Private logDisplay As ListBox
@@ -396,82 +396,75 @@ Partial Class Form1
 
 #Region "Hardware Handlers"
     Private Async Function ReadBarcodeAsync() As Task(Of String)
-        DebugLog($"SCAN: Connecting to {config.KeyenceIP}:{config.KeyencePort}")
-        Try
-            Using client As New TcpClient()
-                client.ReceiveTimeout = 5000
-                client.SendTimeout = 3000
-                Dim connectTask = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
-                If Await Task.WhenAny(connectTask, Task.Delay(3000)) IsNot connectTask Then
-                    DebugLog("SCAN: Connection timeout")
-                    Return "TIMEOUT"
-                End If
-                Await connectTask
-                DebugLog("SCAN: TCP connected")
-                isScannerLive = True
+        DebugLog($"SCAN: === Starting scan on {config.KeyenceIP}:{config.KeyencePort} ===")
+        ' Try multiple command formats to support different Keyence models
+        Dim commands = {
+            "LON" & vbCr,
+            "LON" & vbCrLf,
+            vbCr
+        }
+        For Each cmdStr In commands
+            Try
+                Using client As New TcpClient()
+                    client.ReceiveTimeout = 5000
+                    client.SendTimeout = 3000
+                    Dim connectTask = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
+                    If Await Task.WhenAny(connectTask, Task.Delay(3000)) IsNot connectTask Then
+                        DebugLog("SCAN: Connection timeout")
+                        Continue For
+                    End If
+                    Await connectTask
+                    isScannerLive = True
+                    DebugLog($"SCAN: Connected, trying cmd: [{cmdStr.Replace(vbCr, "\r").Replace(vbLf, "\n")}]")
 
-                Using stream = client.GetStream()
-                    ' Try LON command with CR+LF (some Keyence models need this)
-                    Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCrLf)
-                    Await stream.WriteAsync(cmd, 0, cmd.Length)
-                    DebugLog("SCAN: Sent LON command")
+                    Using stream = client.GetStream()
+                        ' Send trigger command
+                        Dim cmd = Encoding.ASCII.GetBytes(cmdStr)
+                        Await stream.WriteAsync(cmd, 0, cmd.Length)
 
-                    ' Wait for scanner to acquire and respond
-                    Await Task.Delay(500)
-
-                    ' Read with extended attempts
-                    Dim fullResponse As String = ""
-                    Dim buffer(4096) As Byte
-                    Dim attempts = 0
-                    Dim maxAttempts = 10
-
-                    While attempts < maxAttempts
-                        If stream.DataAvailable Then
-                            Dim bytesRead = Await stream.ReadAsync(buffer, 0, buffer.Length)
-                            If bytesRead > 0 Then
-                                fullResponse &= Encoding.ASCII.GetString(buffer, 0, bytesRead)
-                                DebugLog($"SCAN: Read {bytesRead} bytes: [{fullResponse.Replace(vbCr, "\r").Replace(vbLf, "\n")}]")
+                        ' Wait and read with extended timeout
+                        Dim fullResponse As String = ""
+                        Dim buffer(4096) As Byte
+                        Dim totalWait = 0
+                        While totalWait < 3000
+                            If stream.DataAvailable Then
+                                Dim bytesRead = Await stream.ReadAsync(buffer, 0, buffer.Length)
+                                If bytesRead > 0 Then
+                                    fullResponse &= Encoding.ASCII.GetString(buffer, 0, bytesRead)
+                                    DebugLog($"SCAN: +{bytesRead}B = [{fullResponse.Replace(vbCr, "\r").Replace(vbLf, "\n")}]")
+                                    If fullResponse.Length > 3 Then Exit While
+                                End If
+                            Else
+                                Await Task.Delay(200)
+                                totalWait += 200
                             End If
-                            ' Check if we got a complete response
-                            If fullResponse.Contains(vbCr) OrElse fullResponse.Contains(vbLf) OrElse fullResponse.Length > 3 Then
-                                Exit While
-                            End If
-                        Else
-                            Await Task.Delay(300)
+                        End While
+
+                        ' Send LOFF
+                        Try
+                            Dim loff = Encoding.ASCII.GetBytes("LOFF" & vbCr)
+                            Await stream.WriteAsync(loff, 0, loff.Length)
+                        Catch : End Try
+
+                        ' Clean response
+                        Dim result = fullResponse.Trim()
+                        result = New String(result.Where(Function(c) Not Char.IsControl(c)).ToArray()).Trim()
+                        If result.StartsWith("LON", StringComparison.OrdinalIgnoreCase) Then result = result.Substring(3).Trim()
+                        If result.StartsWith("OK", StringComparison.OrdinalIgnoreCase) Then result = result.Substring(2).Trim()
+
+                        DebugLog($"SCAN: Result=[{result}] len={result.Length}")
+                        If Not String.IsNullOrWhiteSpace(result) AndAlso result.Length >= 2 Then
+                            Return result
                         End If
-                        attempts += 1
-                    End While
-
-                    ' Send LOFF to stop scanner
-                    cmd = Encoding.ASCII.GetBytes("LOFF" & vbCrLf)
-                    Await stream.WriteAsync(cmd, 0, cmd.Length)
-                    DebugLog("SCAN: Sent LOFF")
-
-                    ' Clean up response
-                    Dim result = fullResponse.Trim()
-                    result = result.Replace(vbCr, "").Replace(vbLf, "")
-                    ' Strip echo if present
-                    If result.StartsWith("LON", StringComparison.OrdinalIgnoreCase) Then
-                        result = result.Substring(3).Trim()
-                    End If
-                    ' Remove any control chars
-                    result = New String(result.Where(Function(c) Not Char.IsControl(c)).ToArray()).Trim()
-
-                    DebugLog($"SCAN: Final barcode = [{result}] (len={result.Length})")
-
-                    If String.IsNullOrWhiteSpace(result) Then
-                        DebugLog("SCAN: Empty response after cleanup")
-                        Return "ERROR"
-                    End If
-                    Return result
+                    End Using
                 End Using
-            End Using
-        Catch ex As Exception
-            DebugLog($"SCAN-ERR: {ex.GetType().Name}: {ex.Message}")
-            Log("SCAN", $"Scanner Error: {ex.Message}")
-            isScannerLive = False
-            Return "ERROR"
-        End Try
+            Catch ex As Exception
+                DebugLog($"SCAN-ERR: cmd=[{cmdStr.Replace(vbCr, "\r").Replace(vbLf, "\n")}] err={ex.Message}")
+            End Try
+        Next
+        DebugLog("SCAN: All commands failed")
+        isScannerLive = False
+        Return "ERROR"
     End Function
 
     Private Async Function SendTcpHandshakeAsync(ip As String, port As Integer, cmd As String) As Task(Of String)
@@ -575,41 +568,89 @@ Partial Class Form1
             ElseIf source.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) Then
                 bmp = Await Task.Run(Function() FetchImageFromTcp(source))
             ElseIf source.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
-                ' Use WebClient (HTTP/1.0 compatible — Cognex embedded server rejects HttpClient HTTP/1.1)
-                Dim urls As New List(Of String) From {source}
+                ' === Cognex In-Sight 2800 Official API ===
+                ' Step 1: POST /cam0/img/listIds → get image ID
+                ' Step 2: GET /cam0/img/{id} → get JPEG
                 Dim baseUrl = $"http://{config.CognexIP}"
-                If Not urls.Contains($"{baseUrl}/img/snapshot.jpg") Then urls.Add($"{baseUrl}/img/snapshot.jpg")
-                If Not urls.Contains($"{baseUrl}/CgiImage?img=snapshot.bmp") Then urls.Add($"{baseUrl}/CgiImage?img=snapshot.bmp")
-                If Not urls.Contains($"{baseUrl}/CgiSnapshot") Then urls.Add($"{baseUrl}/CgiSnapshot")
-                If Not urls.Contains($"{baseUrl}/liveimg.cgi?imgformat=jpg") Then urls.Add($"{baseUrl}/liveimg.cgi?imgformat=jpg")
-                If Not urls.Contains($"{baseUrl}/api/image/snapshot") Then urls.Add($"{baseUrl}/api/image/snapshot")
-                If Not urls.Contains($"{baseUrl}/snapshot.jpg") Then urls.Add($"{baseUrl}/snapshot.jpg")
-                If Not urls.Contains($"{baseUrl}/image.jpg") Then urls.Add($"{baseUrl}/image.jpg")
+                Dim cognexOK = False
 
-                For Each url In urls
-                    Try
-                        Dim data As Byte() = Nothing
-                        Await Task.Run(Sub()
-                            Using wc As New System.Net.WebClient()
-                                wc.Headers.Add("User-Agent", "VBX/3.0")
-                                data = wc.DownloadData(url)
+                Try
+                    ' Step 1: Get image IDs
+                    Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
+                    listReq.Method = "POST"
+                    listReq.ContentType = "application/json"
+                    listReq.ContentLength = 0
+                    listReq.Timeout = 3000
+                    Dim imgId As String = ""
+                    Using listResp = Await Task.Run(Function() listReq.GetResponse())
+                        Using sr As New IO.StreamReader(listResp.GetResponseStream())
+                            Dim body = sr.ReadToEnd().Trim()
+                            DebugLog($"CAM-COGNEX: listIds response: {body}")
+                            ' Parse first number from response (e.g. "[1166,1167]" → "1166")
+                            Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
+                            If nums.Length > 0 Then imgId = nums(0).Trim()
+                        End Using
+                    End Using
+
+                    If Not String.IsNullOrEmpty(imgId) Then
+                        ' Step 2: Fetch image by ID
+                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}"), System.Net.HttpWebRequest)
+                        imgReq.Method = "GET"
+                        imgReq.Timeout = 5000
+                        Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
+                            Using imgStream = imgResp.GetResponseStream()
+                                Using ms As New IO.MemoryStream()
+                                    imgStream.CopyTo(ms)
+                                    ms.Position = 0
+                                    bmp = New Bitmap(ms)
+                                    cognexOK = True
+                                    DebugLog($"CAM-COGNEX: Got image ID {imgId} ({ms.Length} bytes)")
+                                End Using
                             End Using
-                        End Sub)
-                        If data IsNot Nothing AndAlso data.Length > 100 Then
-                            Using ms As New IO.MemoryStream(data)
-                                bmp = New Bitmap(ms)
+                        End Using
+                    End If
+                Catch cognexEx As Exception
+                    DebugLog($"CAM-COGNEX: API failed — {cognexEx.Message}")
+                End Try
+
+                ' Fallback: try legacy URLs if Cognex 2800 API didn't work
+                If Not cognexOK Then
+                    Dim fallbackUrls = {
+                        source,
+                        $"{baseUrl}/img/snapshot.jpg",
+                        $"{baseUrl}/CgiSnapshot",
+                        $"{baseUrl}/CgiImage?img=snapshot.bmp",
+                        $"{baseUrl}/snapshot.jpg",
+                        $"{baseUrl}/image.jpg"
+                    }
+                    For Each url In fallbackUrls
+                        Try
+                            Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
+                            req.Method = "GET"
+                            req.Timeout = 3000
+                            req.UserAgent = "VBX/3.0"
+                            Using resp = Await Task.Run(Function() req.GetResponse())
+                                Using respStream = resp.GetResponseStream()
+                                    Using ms As New IO.MemoryStream()
+                                        respStream.CopyTo(ms)
+                                        If ms.Length > 100 Then
+                                            ms.Position = 0
+                                            bmp = New Bitmap(ms)
+                                            If url <> config.CameraUrl Then
+                                                config.CameraUrl = url : SaveSettings()
+                                                Log("CAMERA", $"Working URL found: {url}")
+                                            End If
+                                            DebugLog($"CAM-HTTP: OK from {url} ({ms.Length} bytes)")
+                                            Exit For
+                                        End If
+                                    End Using
+                                End Using
                             End Using
-                            If url <> config.CameraUrl Then
-                                config.CameraUrl = url
-                                SaveSettings()
-                                Log("CAMERA", $"Auto-detected working URL: {url}")
-                            End If
-                            Exit For
-                        End If
-                    Catch urlEx As Exception
-                        DebugLog($"CAM-TRY: {url} -> {urlEx.Message}")
-                    End Try
-                Next
+                        Catch urlEx As Exception
+                            DebugLog($"CAM-TRY: {url} -> {urlEx.Message}")
+                        End Try
+                    Next
+                End If
             ElseIf IO.File.Exists(source) Then
                 bmp = Await Task.Run(Function()
                     Using fs = New IO.FileStream(source, IO.FileMode.Open, IO.FileAccess.Read, IO.FileShare.ReadWrite)
@@ -1171,8 +1212,9 @@ Partial Class Form1
             btnPause.BackColor = If(isPaused, CLR_PASS, CLR_WARN)
         End Sub
         btnConfig = CreateActionBtn("⚙  CONFIG", "F5", Color.FromArgb(70, 70, 80)) : AddHandler btnConfig.Click, Sub() ShowConfigDialog()
+        btnExport = CreateActionBtn("📄  LOG", "F6", Color.FromArgb(50, 80, 120)) : AddHandler btnExport.Click, Sub() ExportDebugLog()
         btnExit = CreateActionBtn("✕  EXIT", "ESC", CLR_DANGER) : AddHandler btnExit.Click, Sub() Application.Exit()
-        flpBtns.Controls.AddRange({btnStart, btnReset, btnPause, btnConfig, btnExit})
+        flpBtns.Controls.AddRange({btnStart, btnReset, btnPause, btnConfig, btnExport, btnExit})
 
         pnlFooter.Controls.Add(flpBtns)
     End Sub
@@ -1402,17 +1444,92 @@ Partial Class Form1
 
     Private Sub SaveSettings()
         Try
-            IO.File.WriteAllText(configPath, System.Text.Json.JsonSerializer.Serialize(config))
+            Dim lines As New List(Of String) From {
+                "# VBX Dispensing Control System Configuration",
+                $"# Saved: {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+                "",
+                "[Network]",
+                $"ModbusIP={config.ModbusIP}",
+                $"ModbusPort={config.ModbusPort}",
+                $"CognexIP={config.CognexIP}",
+                $"CognexPort={config.CognexPort}",
+                $"KeyenceIP={config.KeyenceIP}",
+                $"KeyencePort={config.KeyencePort}",
+                "",
+                "[Camera]",
+                $"CameraUrl={config.CameraUrl}",
+                $"CameraSourcePath={config.CameraSourcePath}",
+                "",
+                "[Production]",
+                $"MasterBarcode={config.MasterBarcode}",
+                $"PassCount={config.PassCount}",
+                $"FailCount={config.FailCount}",
+                "",
+                "[System]",
+                $"DebugLogEnabled={config.DebugLogEnabled}"
+            }
+            IO.File.WriteAllLines(configPath, lines, Encoding.UTF8)
         Catch ex As Exception
+            DebugLog($"CONFIG-SAVE-ERR: {ex.Message}")
         End Try
     End Sub
 
     Private Sub LoadSettings()
         Try
-            If IO.File.Exists(configPath) Then
-                config = System.Text.Json.JsonSerializer.Deserialize(Of AppConfig)(IO.File.ReadAllText(configPath))
-            End If
+            If Not IO.File.Exists(configPath) Then Return
+            For Each line In IO.File.ReadAllLines(configPath)
+                Dim trimmed = line.Trim()
+                If String.IsNullOrEmpty(trimmed) OrElse trimmed.StartsWith("#") OrElse trimmed.StartsWith("[") Then Continue For
+                Dim eq = trimmed.IndexOf("="c)
+                If eq < 1 Then Continue For
+                Dim key = trimmed.Substring(0, eq).Trim()
+                Dim val = trimmed.Substring(eq + 1).Trim()
+                Select Case key
+                    Case "ModbusIP" : config.ModbusIP = val
+                    Case "ModbusPort" : Integer.TryParse(val, config.ModbusPort)
+                    Case "CognexIP" : config.CognexIP = val
+                    Case "CognexPort" : Integer.TryParse(val, config.CognexPort)
+                    Case "KeyenceIP" : config.KeyenceIP = val
+                    Case "KeyencePort" : Integer.TryParse(val, config.KeyencePort)
+                    Case "CameraUrl" : config.CameraUrl = val
+                    Case "CameraSourcePath" : config.CameraSourcePath = val
+                    Case "MasterBarcode" : config.MasterBarcode = val
+                    Case "PassCount" : Integer.TryParse(val, config.PassCount)
+                    Case "FailCount" : Integer.TryParse(val, config.FailCount)
+                    Case "DebugLogEnabled" : Boolean.TryParse(val, config.DebugLogEnabled)
+                End Select
+            Next
         Catch ex As Exception
+            DebugLog($"CONFIG-LOAD-ERR: {ex.Message}")
+        End Try
+    End Sub
+#End Region
+
+#Region "Export Debug Log"
+    Private Sub ExportDebugLog()
+        Try
+            Dim todayLog = IO.Path.Combine(logDir, $"debug_{DateTime.Now:yyyy-MM-dd}.log")
+            If Not IO.File.Exists(todayLog) Then
+                MessageBox.Show("No debug log file found for today.", "Export Log", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Return
+            End If
+
+            Using sfd As New SaveFileDialog With {
+                .Title = "Export Debug Log",
+                .Filter = "Text Files|*.txt|Log Files|*.log|All Files|*.*",
+                .FileName = $"VBX_Debug_{DateTime.Now:yyyyMMdd_HHmmss}.txt",
+                .DefaultExt = "txt"
+            }
+                If sfd.ShowDialog() = DialogResult.OK Then
+                    ' Flush current writer
+                    logWriter?.Flush()
+                    IO.File.Copy(todayLog, sfd.FileName, True)
+                    Log("SYSTEM", $"Debug log exported to: {sfd.FileName}")
+                    MessageBox.Show($"Log exported successfully!" & vbCrLf & sfd.FileName, "Export Log", MessageBoxButtons.OK, MessageBoxIcon.Information)
+                End If
+            End Using
+        Catch ex As Exception
+            MessageBox.Show($"Export failed: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
         End Try
     End Sub
 #End Region
@@ -1424,6 +1541,7 @@ Partial Class Form1
             Case Keys.F2 : isSoftwareResetRequested = True : Return True
             Case Keys.F3 : isPaused = Not isPaused : Return True
             Case Keys.F5 : ShowConfigDialog() : Return True
+            Case Keys.F6 : ExportDebugLog() : Return True
             Case Keys.Escape : Application.Exit() : Return True
         End Select
         Return MyBase.ProcessCmdKey(msg, keyData)
