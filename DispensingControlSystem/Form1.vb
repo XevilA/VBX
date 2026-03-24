@@ -203,6 +203,7 @@ Partial Class Form1
                     outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
                     outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
                     Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
+                    LogClampIO("LOCK → Extend ON")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
@@ -214,11 +215,10 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = False
                 outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
                 If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                    Log("CLAMP", "✓ Cylinder Extended — Scanning Barcode")
+                    LogClampIO("✓ Extended — Sensor confirmed")
                     currentState = MachineStatus.SCANNING
                 ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    ' Timeout: sensor never triggered — proceed anyway
-                    Log("CLAMP", "⚠ Extend sensor timeout (10s) — Proceeding to scan")
+                    LogClampIO("⚠ Extend TIMEOUT 10s — Proceeding")
                     currentState = MachineStatus.SCANNING
                 End If
 
@@ -280,6 +280,7 @@ Partial Class Form1
                 ' Wait for operator press Start to acknowledge
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged — Retracting")
+                    LogClampIO("UNLOCK → Retract ON (MODEL_FAIL)")
                     clampStartTime = DateTime.Now
                     currentState = MachineStatus.MODEL_FAIL_RETRACT
                 End If
@@ -294,6 +295,7 @@ Partial Class Form1
                     alarmMessage = ""
                     lastBarcode = ""
                     Log("CLAMP", "✓ Retracted — Remove Part")
+                    LogClampIO("✓ Retracted (MODEL_FAIL)")
                     config.FailCount += 1 : SaveSettings()
                     currentState = MachineStatus.IDLE
                 End If
@@ -389,6 +391,7 @@ Partial Class Form1
                     outputs(DO_LIGHT_GRN) = True
                     cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
                     Log("CYCLE", $"✓ Cycle Complete ({cycleDuration:F2}s)")
+                    LogClampIO("✓ Retracted (VISION_OK)")
                     currentState = MachineStatus.CYCLE_COMPLETE
                 End If
 
@@ -402,6 +405,7 @@ Partial Class Form1
                     ' Unlock: Retract ON, Extend OFF
                     outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
                     outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                    LogClampIO("UNLOCK → Retract ON (VISION_NG)")
                     clampStartTime = DateTime.Now
                     currentState = MachineStatus.VISION_NG_RETRACT
                 End If
@@ -549,6 +553,15 @@ Partial Class Form1
 
     Private Sub ResetOutputs()
         For i = 0 To 15 : outputs(i) = False : Next
+    End Sub
+
+    Private Sub LogClampIO(action As String)
+        ' Detailed I/O status for clamp debugging
+        Dim doStatus = $"DO[Q1.4={If(outputs(DO_CLAMP), "ON", "off")} Q1.5={If(outputs(DO_CLAMP2), "ON", "off")} Q1.6={If(outputs(DO_CLAMP3), "ON", "off")} Q1.7={If(outputs(DO_CLAMP4), "ON", "off")}]"
+        Dim diStatus = $"DI[I1.1={If(inputs(DI_CYL_EXT), "ON", "off")} I1.2={If(inputs(DI_CYL_RET), "ON", "off")} I1.3={If(inputs(DI_CYL_EXT2), "ON", "off")} I1.4={If(inputs(DI_CYL_RET2), "ON", "off")}]"
+        Dim startStatus = $"START[I0.1={If(inputs(DI_START), "ON", "off")} I0.2={If(inputs(DI_START2), "ON", "off")}]"
+        DebugLog($"CLAMP-IO: {action} | {doStatus} | {diStatus} | {startStatus} | State={currentState}")
+        Log("CLAMP", $"{action} | {doStatus}")
     End Sub
 
     Private Sub UpdateProgramBits()
