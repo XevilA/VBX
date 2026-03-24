@@ -140,6 +140,7 @@ Partial Class Form1
     Private indModbus, indVision, indScanner As Panel
     Private lblIndModbus, lblIndVision, lblIndScanner As Label
     Private logDisplay As ListBox
+    Private lstScanHistory As ListBox
     Private mainTimer, cameraTimer As Timer
     Private lblStatsPass, lblStatsFail, lblStatsTime, lblStatsYield As Label
     Private cbProgramSelect As ComboBox
@@ -226,15 +227,20 @@ Partial Class Form1
                     Await Task.Delay(500)
                 End If
 
-            ' ── MODEL_CHECK: Match barcode ──
+            ' ── MODEL_CHECK: Map barcode → program ──
             Case MachineStatus.MODEL_CHECK
-                If lastBarcode = config.MasterBarcode OrElse config.MasterBarcode = "*" Then
+                ' If MasterBarcode is "*" or matches, proceed
+                ' Otherwise, barcode IS the identifier — just accept it and proceed
+                If config.MasterBarcode = "*" OrElse lastBarcode = config.MasterBarcode OrElse config.MasterBarcode = "" Then
                     Log("VERIFY", $"✓ Model Match: {lastBarcode}")
+                    AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     currentState = MachineStatus.CURTAIN_CHECK
                 Else
-                    alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
-                    Log("VERIFY", $"✗ {alarmMessage}")
-                    currentState = MachineStatus.MODEL_FAIL
+                    ' Accept ANY barcode — just use it as model ID and proceed
+                    ' The barcode identifies the part, not a specific "master" code
+                    Log("VERIFY", $"✓ Barcode Accepted: {lastBarcode} (Program: {cbProgramSelect.SelectedIndex + 1})")
+                    AddScanHistory(lastBarcode, "✓ ACCEPTED")
+                    currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
             ' ── MODEL_FAIL: Red ON, popup wrong PWBA ──
@@ -327,6 +333,7 @@ Partial Class Form1
                     Log("VISION", "✓ Inspection PASSED")
                     lastVisionResult = "PASS"
                     config.PassCount += 1 : SaveSettings()
+                    UpdateScanHistoryStatus(lastBarcode, "✅ PASS")
                     ' Auto unclamp + retract
                     outputs(DO_CLAMP) = False
                     outputs(DO_CLAMP2) = False
@@ -337,6 +344,7 @@ Partial Class Form1
                     Log("VISION", "✗ Inspection FAILED")
                     lastVisionResult = "FAIL"
                     config.FailCount += 1 : SaveSettings()
+                    UpdateScanHistoryStatus(lastBarcode, "❌ FAIL")
                     currentState = MachineStatus.VISION_NG
                 End If
 
@@ -373,9 +381,14 @@ Partial Class Form1
                     currentState = MachineStatus.IDLE
                 End If
 
-            ' ── CYCLE_COMPLETE: Green ON → IDLE ──
+            ' ── CYCLE_COMPLETE: Green ON, reset outputs → IDLE ──
             Case MachineStatus.CYCLE_COMPLETE
                 outputs(DO_LIGHT_GRN) = True
+                ' Reset all work outputs (keep green light)
+                outputs(DO_PROG_LOAD) = False
+                outputs(DO_ROBOT_START) = False
+                outputs(DO_ROBOT_PAUSE) = False
+                outputs(DO_ROBOT_EMGCY) = False
                 Log("DATA", "Sending data to server...")
                 ' TODO: server data upload here
                 Await Task.Delay(500)
@@ -387,7 +400,13 @@ Partial Class Form1
                 outputs(DO_LIGHT_YEL) = False
                 outputs(DO_LIGHT_GRN) = False
                 If triggerReset Then
+                    ' Reset ALL outputs back to safe state
+                    For i = 0 To outputs.Length - 1
+                        outputs(i) = False
+                    Next
+                    outputs(DO_LIGHT_GRN) = True  ' Green = Ready
                     alarmMessage = ""
+                    Log("SYSTEM", "Fault cleared — All outputs reset")
                     currentState = MachineStatus.IDLE
                 End If
         End Select
@@ -421,7 +440,8 @@ Partial Class Form1
                         Dim cmd = Encoding.ASCII.GetBytes(cmdStr)
                         Await stream.WriteAsync(cmd, 0, cmd.Length)
 
-                        ' Wait and read with extended timeout
+                        ' Wait for scanner to acquire barcode (critical for Keyence)
+                        Await Task.Delay(500)
                         Dim fullResponse As String = ""
                         Dim buffer(4096) As Byte
                         Dim totalWait = 0
@@ -1198,6 +1218,34 @@ Partial Class Form1
         AddHandler logDisplay.DrawItem, AddressOf DrawLogItem
         pnlFooter.Controls.Add(logDisplay)
 
+        ' Scan History
+        Dim pnlHistory As New Panel With {
+            .Dock = DockStyle.Left, .Width = 280, .BackColor = Color.FromArgb(18, 18, 24), .Padding = New Padding(4)
+        }
+        Dim lblHistTitle As New Label With {
+            .Text = "📱 Scan History", .Dock = DockStyle.Top, .Height = 22,
+            .ForeColor = Color.FromArgb(180, 200, 255), .Font = New Font("Segoe UI Semibold", 9),
+            .TextAlign = ContentAlignment.MiddleLeft
+        }
+        lstScanHistory = New ListBox With {
+            .Dock = DockStyle.Fill, .BackColor = Color.FromArgb(12, 12, 18),
+            .ForeColor = Color.FromArgb(200, 200, 200), .Font = New Font("Consolas", 8.5F),
+            .BorderStyle = BorderStyle.None, .DrawMode = DrawMode.OwnerDrawFixed, .ItemHeight = 20
+        }
+        AddHandler lstScanHistory.DrawItem, Sub(s, e)
+            If e.Index < 0 Then Return
+            e.DrawBackground()
+            Dim txt = lstScanHistory.Items(e.Index).ToString()
+            Dim clr = Color.FromArgb(180, 180, 180)
+            If txt.Contains("✅") Then clr = Color.FromArgb(50, 220, 100)
+            If txt.Contains("❌") Then clr = Color.FromArgb(255, 80, 80)
+            If txt.Contains("✓ ACCEPTED") Then clr = Color.FromArgb(100, 180, 255)
+            TextRenderer.DrawText(e.Graphics, txt, lstScanHistory.Font, e.Bounds, clr, TextFormatFlags.Left Or TextFormatFlags.VerticalCenter)
+        End Sub
+        pnlHistory.Controls.Add(lstScanHistory)
+        pnlHistory.Controls.Add(lblHistTitle)
+        pnlFooter.Controls.Add(pnlHistory)
+
         ' Buttons
         Dim flpBtns As New FlowLayoutPanel With {
             .Dock = DockStyle.Right, .Width = 680,
@@ -1334,6 +1382,26 @@ Partial Class Form1
         logDisplay.Items.Insert(0, entry)
         If logDisplay.Items.Count > 200 Then logDisplay.Items.RemoveAt(200)
         DebugLog($"{category.PadRight(8)} | {msg}")
+    End Sub
+
+    Private Sub AddScanHistory(barcode As String, status As String)
+        If lstScanHistory.InvokeRequired Then : lstScanHistory.Invoke(Sub() AddScanHistory(barcode, status)) : Return : End If
+        Dim entry = $"[{DateTime.Now:HH:mm:ss}] {barcode}  {status}"
+        lstScanHistory.Items.Insert(0, entry)
+        If lstScanHistory.Items.Count > 100 Then lstScanHistory.Items.RemoveAt(100)
+    End Sub
+
+    Private Sub UpdateScanHistoryStatus(barcode As String, newStatus As String)
+        If lstScanHistory.InvokeRequired Then : lstScanHistory.Invoke(Sub() UpdateScanHistoryStatus(barcode, newStatus)) : Return : End If
+        ' Find latest entry with this barcode and update status
+        For i = 0 To Math.Min(lstScanHistory.Items.Count - 1, 20)
+            Dim item = lstScanHistory.Items(i).ToString()
+            If item.Contains(barcode) AndAlso item.Contains("✓ ACCEPTED") Then
+                lstScanHistory.Items(i) = item.Replace("✓ ACCEPTED", newStatus)
+                lstScanHistory.Refresh()
+                Exit For
+            End If
+        Next
     End Sub
 #End Region
 

@@ -1,0 +1,913 @@
+﻿
+═══════════════════════════════════════════════════
+  VBX DEBUG LOG — Started 2026-03-24 21:33:47
+═══════════════════════════════════════════════════
+  Modbus: 192.168.1.12:502
+  Cognex: 192.168.1.20:80
+  Scanner: 192.168.1.54:9004
+  Camera URL: http://192.168.1.20/cam0/img/listIds
+  Camera Path: (none — using HTTP)
+═══════════════════════════════════════════════════
+[2026-03-24 21:33:47.836] SYSTEM   | ═══ VBX Production HMI v3.0 Initialized ═══
+[2026-03-24 21:33:47.837] SYSTEM   | Modbus: 192.168.1.12 | Camera: 192.168.1.20 | Scanner: 192.168.1.54
+[2026-03-24 21:33:47.942] SYSTEM   | Auto-detecting devices...
+[2026-03-24 21:33:47.943] AUTO-DETECT: Starting device scan...
+[2026-03-24 21:33:47.943] DETECT   | Scanning Modbus at 192.168.1.12:502
+[2026-03-24 21:33:47.956] DETECT   | ✓ Modbus ONLINE at 192.168.1.12:502
+[2026-03-24 21:33:47.956] AUTO-DETECT: Modbus connected OK
+[2026-03-24 21:33:47.957] DETECT   | Scanning Cognex at 192.168.1.20:80
+[2026-03-24 21:33:47.973] DETECT   | ✓ Cognex ONLINE (response: HTTP/1.1 400 Bad Request
+Server: nginx
+Date: Wed, 02 Jan 2019 18:06:47 GMT
+Content-Type: text/html
+Content-Length: 150
+Connection: close
+
+<html>
+<head><title>400 Bad Request</title></head>
+<body>
+<center><h1>400 Bad Request</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>)
+[2026-03-24 21:33:47.973] DETECT   | Scanning Keyence at 192.168.1.54:9004
+[2026-03-24 21:33:47.976] DETECT   | ✓ Keyence ONLINE at 192.168.1.54:9004
+[2026-03-24 21:33:47.976] AUTO-DETECT: Keyence TCP connected OK
+[2026-03-24 21:33:47.976] DETECT   | Scanning Camera at http://192.168.1.20/cam0/img/listIds
+[2026-03-24 21:33:48.012] DETECT   | ✗ Camera HTTP error (NotFound)
+[2026-03-24 21:33:48.012] AUTO-DETECT: Scan complete
+[2026-03-24 21:33:48.012] DETECT   | Device scan complete
+[2026-03-24 21:33:48.650] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:49.082] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:49.464] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:49.894] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:50.272] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:50.709] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:51.080] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:51.511] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:51.899] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:52.330] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:52.707] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:53.147] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:53.520] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:53.953] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:54.337] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:54.770] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:55.146] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:55.582] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:55.954] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:56.388] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:56.779] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:57.212] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:57.593] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:58.024] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:58.390] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:58.826] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:33:59.214] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:33:59.649] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:00.022] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:00.454] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:00.832] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:01.269] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:01.639] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:02.073] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:02.462] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:02.897] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:03.275] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:03.707] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:04.077] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:04.511] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:04.901] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:05.336] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:05.707] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:06.138] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:06.516] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:06.947] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:07.341] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:07.775] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:08.165] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:08.597] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:08.981] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:09.416] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:09.779] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:10.215] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:10.604] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:11.037] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:11.411] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:11.845] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:12.240] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:12.673] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:13.055] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:13.492] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:13.506] CYCLE    | ▶ Start — Clamp Cylinder Extend
+[2026-03-24 21:34:13.556] CLAMP    | ✓ Cylinder Extended — Scanning Barcode
+[2026-03-24 21:34:13.667] SCAN     | Acquiring Barcode...
+[2026-03-24 21:34:13.667] SCAN: === Starting scan on 192.168.1.54:9004 ===
+[2026-03-24 21:34:13.669] SCAN: Connected, trying cmd: [LON\r]
+[2026-03-24 21:34:13.861] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:14.293] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:14.293] SCAN: +8B = [8614553\r]
+[2026-03-24 21:34:14.293] SCAN: Result=[8614553] len=7
+[2026-03-24 21:34:14.294] SCAN     | Barcode: 8614553
+[2026-03-24 21:34:14.314] VERIFY   | ✗ Wrong PWBA! Expected: VBX-001, Got: 8614553
+[2026-03-24 21:34:14.669] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:15.098] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:15.494] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:15.930] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:16.300] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:16.735] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:17.109] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:17.545] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:17.945] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:18.378] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:18.737] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:19.169] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:19.546] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:19.983] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:20.370] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:20.802] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:21.173] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:21.607] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:22.001] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:22.431] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:22.806] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:23.241] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:23.615] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:24.053] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:24.420] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:24.852] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:25.242] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:25.679] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:26.053] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:26.487] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:26.860] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:27.296] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:27.695] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:28.127] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:28.493] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:28.924] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:29.302] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:29.734] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:30.110] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:30.542] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:30.920] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:31.350] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:31.743] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:32.179] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:32.551] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:32.984] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:33.372] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:33.803] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:34.177] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:34.607] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:34.987] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:35.422] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:35.820] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:36.254] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:36.624] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:37.056] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:37.446] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:37.879] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:38.261] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:38.689] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:39.068] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:39.499] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:39.879] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:40.309] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:40.690] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:41.124] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:41.512] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:41.943] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:42.330] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:42.760] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:43.146] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:43.580] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:43.954] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:44.387] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:44.767] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:45.199] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:45.587] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:46.019] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:46.401] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:46.831] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:47.209] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:47.642] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:48.028] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:48.457] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:48.830] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:49.268] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:49.641] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:50.074] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:50.464] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:50.899] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:51.277] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:51.719] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:52.090] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:52.522] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:52.902] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:53.340] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:53.709] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:54.143] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:54.519] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:54.997] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:55.339] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:55.775] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:56.153] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:56.584] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:56.964] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:57.642] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:57.767] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:58.197] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:58.576] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:59.011] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:34:59.406] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:34:59.840] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:35:00.210] CAM-COGNEX: listIds response: [58]
+[2026-03-24 21:35:00.644] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:35:01.047] CAM-COGNEX: listIds response: [58,59]
+[2026-03-24 21:35:01.580] CAM-COGNEX: Got image ID 58 (4665704 bytes)
+[2026-03-24 21:35:01.830] CAM-COGNEX: listIds response: [60,61,62]
+[2026-03-24 21:35:02.432] CAM-COGNEX: Got image ID 60 (4665704 bytes)
+[2026-03-24 21:35:02.646] CAM-COGNEX: listIds response: [64,65]
+[2026-03-24 21:35:03.140] CAM-COGNEX: Got image ID 64 (4665704 bytes)
+[2026-03-24 21:35:03.468] CAM-COGNEX: listIds response: [67,68,69]
+[2026-03-24 21:35:03.474] CAM-COGNEX: API failed — The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.477] CAM-TRY: http://192.168.1.20/cam0/img/listIds -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.478] CAM-TRY: http://192.168.1.20/img/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.481] CAM-TRY: http://192.168.1.20/CgiSnapshot -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.483] CAM-TRY: http://192.168.1.20/CgiImage?img=snapshot.bmp -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.486] CAM-TRY: http://192.168.1.20/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.488] CAM-TRY: http://192.168.1.20/image.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:03.488] CAM-ERR: No image data received
+[2026-03-24 21:35:04.278] CAM-COGNEX: listIds response: [72,73]
+[2026-03-24 21:35:04.803] CAM-COGNEX: Got image ID 72 (4665704 bytes)
+[2026-03-24 21:35:05.111] CAM-COGNEX: listIds response: [75,76,77]
+[2026-03-24 21:35:05.694] CAM-COGNEX: Got image ID 75 (4665704 bytes)
+[2026-03-24 21:35:05.965] CAM-COGNEX: listIds response: [79,80,81]
+[2026-03-24 21:35:06.503] CAM-COGNEX: Got image ID 79 (4665704 bytes)
+[2026-03-24 21:35:06.706] CAM-COGNEX: listIds response: [83,84]
+[2026-03-24 21:35:07.235] CAM-COGNEX: Got image ID 83 (4665704 bytes)
+[2026-03-24 21:35:07.531] CAM-COGNEX: listIds response: [86,87,88]
+[2026-03-24 21:35:08.073] CAM-COGNEX: Got image ID 86 (4665704 bytes)
+[2026-03-24 21:35:08.329] CAM-COGNEX: listIds response: [90,91]
+[2026-03-24 21:35:08.882] CAM-COGNEX: Got image ID 90 (4665704 bytes)
+[2026-03-24 21:35:09.191] CAM-COGNEX: listIds response: [93,94,95]
+[2026-03-24 21:35:09.735] CAM-COGNEX: Got image ID 93 (4665704 bytes)
+[2026-03-24 21:35:09.953] CAM-COGNEX: listIds response: [97,98]
+[2026-03-24 21:35:10.487] CAM-COGNEX: Got image ID 97 (4665704 bytes)
+[2026-03-24 21:35:10.792] CAM-COGNEX: listIds response: [100,101,102]
+[2026-03-24 21:35:11.337] CAM-COGNEX: Got image ID 100 (4665704 bytes)
+[2026-03-24 21:35:11.584] CAM-COGNEX: listIds response: [104,105]
+[2026-03-24 21:35:12.073] CAM-COGNEX: Got image ID 104 (4665704 bytes)
+[2026-03-24 21:35:12.426] CAM-COGNEX: listIds response: [107,108,109]
+[2026-03-24 21:35:12.431] CAM-COGNEX: API failed — The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.434] CAM-TRY: http://192.168.1.20/cam0/img/listIds -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.435] CAM-TRY: http://192.168.1.20/img/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.437] CAM-TRY: http://192.168.1.20/CgiSnapshot -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.440] CAM-TRY: http://192.168.1.20/CgiImage?img=snapshot.bmp -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.442] CAM-TRY: http://192.168.1.20/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.444] CAM-TRY: http://192.168.1.20/image.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:12.444] CAM-ERR: No image data received
+[2026-03-24 21:35:13.225] CAM-COGNEX: listIds response: [111,112,113,1000000002329]
+[2026-03-24 21:35:13.778] CAM-COGNEX: Got image ID 111 (4665704 bytes)
+[2026-03-24 21:35:14.024] CAM-COGNEX: listIds response: [115,116]
+[2026-03-24 21:35:14.587] CAM-COGNEX: Got image ID 115 (4665704 bytes)
+[2026-03-24 21:35:14.840] CAM-COGNEX: listIds response: [118,119,1000000002377]
+[2026-03-24 21:35:15.348] CAM-COGNEX: Got image ID 118 (4665704 bytes)
+[2026-03-24 21:35:15.651] CAM-COGNEX: listIds response: [121,122,123]
+[2026-03-24 21:35:16.184] CAM-COGNEX: Got image ID 121 (4665704 bytes)
+[2026-03-24 21:35:16.453] CAM-COGNEX: listIds response: [125,126]
+[2026-03-24 21:35:16.981] CAM-COGNEX: Got image ID 125 (4665704 bytes)
+[2026-03-24 21:35:17.292] CAM-COGNEX: listIds response: [128,129,130,1000000002447]
+[2026-03-24 21:35:17.854] CAM-COGNEX: Got image ID 128 (4665704 bytes)
+[2026-03-24 21:35:18.083] CAM-COGNEX: listIds response: [131,133]
+[2026-03-24 21:35:18.610] CAM-COGNEX: Got image ID 131 (4665704 bytes)
+[2026-03-24 21:35:18.910] CAM-COGNEX: listIds response: [135,136,137]
+[2026-03-24 21:35:19.450] CAM-COGNEX: Got image ID 135 (4665704 bytes)
+[2026-03-24 21:35:19.719] CAM-COGNEX: listIds response: [139,140]
+[2026-03-24 21:35:20.335] CAM-COGNEX: Got image ID 139 (4665704 bytes)
+[2026-03-24 21:35:20.524] CAM-COGNEX: listIds response: [143,144]
+[2026-03-24 21:35:21.061] CAM-COGNEX: Got image ID 143 (4665704 bytes)
+[2026-03-24 21:35:21.344] CAM-COGNEX: listIds response: [146,147,148]
+[2026-03-24 21:35:21.914] CAM-COGNEX: Got image ID 146 (4665704 bytes)
+[2026-03-24 21:35:22.151] CAM-COGNEX: listIds response: [150,151]
+[2026-03-24 21:35:22.683] CAM-COGNEX: Got image ID 150 (4665704 bytes)
+[2026-03-24 21:35:23.019] CAM-COGNEX: listIds response: [153,154,155]
+[2026-03-24 21:35:23.511] CAM-COGNEX: Got image ID 153 (4665704 bytes)
+[2026-03-24 21:35:23.803] CAM-COGNEX: listIds response: [156,157]
+[2026-03-24 21:35:24.334] CAM-COGNEX: Got image ID 156 (4665704 bytes)
+[2026-03-24 21:35:24.588] CAM-COGNEX: listIds response: [159,160]
+[2026-03-24 21:35:25.142] CAM-COGNEX: Got image ID 159 (4665704 bytes)
+[2026-03-24 21:35:25.392] CAM-COGNEX: listIds response: [162,163,164]
+[2026-03-24 21:35:25.934] CAM-COGNEX: Got image ID 162 (4665704 bytes)
+[2026-03-24 21:35:26.218] CAM-COGNEX: listIds response: [166,167,168]
+[2026-03-24 21:35:26.805] CAM-COGNEX: Got image ID 166 (4665704 bytes)
+[2026-03-24 21:35:27.018] CAM-COGNEX: listIds response: [169,170,171]
+[2026-03-24 21:35:27.022] CAM-COGNEX: API failed — The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.025] CAM-TRY: http://192.168.1.20/cam0/img/listIds -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.027] CAM-TRY: http://192.168.1.20/img/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.029] CAM-TRY: http://192.168.1.20/CgiSnapshot -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.031] CAM-TRY: http://192.168.1.20/CgiImage?img=snapshot.bmp -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.034] CAM-TRY: http://192.168.1.20/snapshot.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.036] CAM-TRY: http://192.168.1.20/image.jpg -> The remote server returned an error: (404) Not Found.
+[2026-03-24 21:35:27.036] CAM-ERR: No image data received
+[2026-03-24 21:35:27.843] CAM-COGNEX: listIds response: [173,174,175]
+[2026-03-24 21:35:28.377] CAM-COGNEX: Got image ID 173 (4665704 bytes)
+[2026-03-24 21:35:28.667] CAM-COGNEX: listIds response: [177,178]
+[2026-03-24 21:35:29.219] CAM-COGNEX: Got image ID 177 (4665704 bytes)
+[2026-03-24 21:35:29.505] CAM-COGNEX: listIds response: [180,181,182]
+[2026-03-24 21:35:30.038] CAM-COGNEX: Got image ID 180 (4665704 bytes)
+[2026-03-24 21:35:30.278] CAM-COGNEX: listIds response: [184,185]
+[2026-03-24 21:35:30.810] CAM-COGNEX: Got image ID 184 (4665704 bytes)
+[2026-03-24 21:35:31.122] CAM-COGNEX: listIds response: [187,188,189]
+[2026-03-24 21:35:31.658] CAM-COGNEX: Got image ID 187 (4665704 bytes)
+[2026-03-24 21:35:31.976] CAM-COGNEX: listIds response: [191,192,193]
+[2026-03-24 21:35:32.561] CAM-COGNEX: Got image ID 191 (4665704 bytes)
+[2026-03-24 21:35:32.705] CAM-COGNEX: listIds response: [195,196]
+[2026-03-24 21:35:33.289] CAM-COGNEX: Got image ID 195 (4665704 bytes)
+[2026-03-24 21:35:33.526] CAM-COGNEX: listIds response: [198,199,200]
+[2026-03-24 21:35:34.193] CAM-COGNEX: Got image ID 198 (4665704 bytes)
+[2026-03-24 21:35:34.332] CAM-COGNEX: listIds response: [202,203,204]
+[2026-03-24 21:35:34.943] CAM-COGNEX: Got image ID 202 (4665704 bytes)
+[2026-03-24 21:35:35.166] CAM-COGNEX: listIds response: [206,207]
+[2026-03-24 21:35:35.700] CAM-COGNEX: Got image ID 206 (4665704 bytes)
+[2026-03-24 21:35:35.966] CAM-COGNEX: listIds response: [210,211]
+[2026-03-24 21:35:36.629] CAM-COGNEX: Got image ID 210 (4665704 bytes)
+[2026-03-24 21:35:36.781] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:37.216] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:37.584] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:38.012] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:38.392] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:38.824] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:39.201] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:39.633] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:40.018] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:40.447] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:40.842] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:41.438] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:41.645] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:42.077] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:42.468] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:42.898] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:43.266] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:43.854] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:44.076] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:44.507] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:44.890] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:45.318] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:45.705] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:46.138] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:46.514] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:46.944] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:47.328] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:47.759] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:48.152] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:48.581] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:48.955] CAM-COGNEX: listIds response: [213]
+[2026-03-24 21:35:49.388] CAM-COGNEX: Got image ID 213 (4665704 bytes)
+[2026-03-24 21:35:49.767] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:50.199] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:50.580] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:51.010] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:51.396] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:51.836] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:52.201] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:52.637] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:53.026] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:53.458] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:53.843] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:54.276] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:54.642] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:55.076] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:55.466] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:55.902] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:56.274] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:56.707] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:57.083] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:57.512] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:57.902] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:58.330] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:58.712] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:59.148] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:35:59.517] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:35:59.950] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:00.198] SYSTEM   | Operator acknowledged — Retracting
+[2026-03-24 21:36:00.292] CLAMP    | ✓ Retracted — Remove Part
+[2026-03-24 21:36:00.326] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:00.761] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:01.152] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:01.584] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:01.957] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:02.391] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:02.764] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:03.196] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:03.599] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:04.031] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:04.415] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:04.851] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:05.223] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:05.657] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:06.030] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:06.461] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:06.853] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:07.292] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:07.672] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:08.107] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:08.477] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:08.911] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+
+═══════════════════════════════════════════════════
+  VBX DEBUG LOG — Started 2026-03-24 21:36:17
+═══════════════════════════════════════════════════
+  Modbus: 192.168.1.12:502
+  Cognex: 192.168.1.20:80
+  Scanner: 192.168.1.54:9004
+  Camera URL: http://192.168.1.20/cam0/img/listIds
+  Camera Path: (none — using HTTP)
+═══════════════════════════════════════════════════
+[2026-03-24 21:36:17.936] SYSTEM   | ═══ VBX Production HMI v3.0 Initialized ═══
+[2026-03-24 21:36:17.937] SYSTEM   | Modbus: 192.168.1.12 | Camera: 192.168.1.20 | Scanner: 192.168.1.54
+[2026-03-24 21:36:18.043] SYSTEM   | Auto-detecting devices...
+[2026-03-24 21:36:18.044] AUTO-DETECT: Starting device scan...
+[2026-03-24 21:36:18.044] DETECT   | Scanning Modbus at 192.168.1.12:502
+[2026-03-24 21:36:18.068] DETECT   | ✓ Modbus ONLINE at 192.168.1.12:502
+[2026-03-24 21:36:18.068] AUTO-DETECT: Modbus connected OK
+[2026-03-24 21:36:18.068] DETECT   | Scanning Cognex at 192.168.1.20:80
+[2026-03-24 21:36:18.073] DETECT   | ✓ Cognex ONLINE (response: HTTP/1.1 400 Bad Request
+Server: nginx
+Date: Wed, 02 Jan 2019 18:09:17 GMT
+Content-Type: text/html
+Content-Length: 150
+Connection: close
+
+<html>
+<head><title>400 Bad Request</title></head>
+<body>
+<center><h1>400 Bad Request</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>)
+[2026-03-24 21:36:18.074] DETECT   | Scanning Keyence at 192.168.1.54:9004
+[2026-03-24 21:36:18.077] DETECT   | ✓ Keyence ONLINE at 192.168.1.54:9004
+[2026-03-24 21:36:18.077] AUTO-DETECT: Keyence TCP connected OK
+[2026-03-24 21:36:18.077] DETECT   | Scanning Camera at http://192.168.1.20/cam0/img/listIds
+[2026-03-24 21:36:18.116] DETECT   | ✗ Camera HTTP error (NotFound)
+[2026-03-24 21:36:18.116] AUTO-DETECT: Scan complete
+[2026-03-24 21:36:18.117] DETECT   | Device scan complete
+[2026-03-24 21:36:18.747] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:19.183] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:19.550] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:19.981] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:20.372] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:20.803] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:21.179] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:21.615] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:21.993] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:22.426] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:22.810] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:23.247] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:23.405] CYCLE    | ▶ Start — Clamp Cylinder Extend
+[2026-03-24 21:36:23.516] CLAMP    | ✓ Cylinder Extended — Scanning Barcode
+[2026-03-24 21:36:23.614] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:24.051] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:24.060] SCAN     | Acquiring Barcode...
+[2026-03-24 21:36:24.060] SCAN: === Starting scan on 192.168.1.54:9004 ===
+[2026-03-24 21:36:24.063] SCAN: Connected, trying cmd: [LON\r]
+[2026-03-24 21:36:24.420] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:24.852] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:25.246] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:25.679] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:26.052] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:26.488] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:26.861] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:27.297] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:27.683] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:28.124] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:28.493] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:28.927] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:29.302] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:29.739] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:29.947] SCAN: Result=[] len=0
+[2026-03-24 21:36:30.110] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:30.541] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:30.541] SCAN: Connected, trying cmd: [\r]
+[2026-03-24 21:36:30.921] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:31.356] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:31.749] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:32.192] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:32.571] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:33.007] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:33.382] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:33.817] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:34.189] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:34.624] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:35.012] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:35.447] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:35.820] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:36.255] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:36.465] SCAN: Result=[] len=0
+[2026-03-24 21:36:36.465] SCAN: All commands failed
+[2026-03-24 21:36:36.466] SCAN     | Read Failed — Retrying...
+[2026-03-24 21:36:36.627] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:37.060] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:37.081] SCAN     | Acquiring Barcode...
+[2026-03-24 21:36:37.081] SCAN: === Starting scan on 192.168.1.54:9004 ===
+[2026-03-24 21:36:37.083] SCAN: Connected, trying cmd: [LON\r]
+[2026-03-24 21:36:37.437] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:37.868] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:37.869] SCAN: +8B = [8614553\r]
+[2026-03-24 21:36:37.869] SCAN: Result=[8614553] len=7
+[2026-03-24 21:36:37.870] SCAN     | Barcode: 8614553
+[2026-03-24 21:36:37.891] VERIFY   | ✗ Wrong PWBA! Expected: VBX-001, Got: 8614553
+[2026-03-24 21:36:38.261] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:38.696] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:39.068] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:39.503] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:39.876] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:40.310] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:40.699] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:41.129] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:41.517] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:41.954] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:42.316] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:42.749] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:43.124] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:43.556] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:43.943] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:44.378] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:44.751] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:45.187] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:45.578] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:46.013] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:46.384] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:46.817] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:47.193] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:47.627] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:47.997] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:48.430] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:48.819] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:49.250] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:49.633] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:50.068] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:50.450] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:50.880] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:51.259] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:51.696] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:52.064] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:52.497] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:52.887] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:53.322] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:53.695] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:54.130] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:54.503] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:54.938] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:55.335] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:55.767] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:56.132] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:56.568] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:56.940] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:57.374] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:57.747] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:58.180] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:58.571] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:59.006] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:36:59.377] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:36:59.813] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:00.199] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:00.633] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:01.015] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:01.446] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:01.813] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:02.245] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:02.637] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:03.070] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:03.444] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:03.875] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:04.249] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:04.685] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:05.080] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:05.516] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+
+═══════════════════════════════════════════════════
+  VBX DEBUG LOG — Started 2026-03-24 21:37:11
+═══════════════════════════════════════════════════
+  Modbus: 192.168.1.12:502
+  Cognex: 192.168.1.20:80
+  Scanner: 192.168.1.54:9004
+  Camera URL: http://192.168.1.20/cam0/img/listIds
+  Camera Path: (none — using HTTP)
+═══════════════════════════════════════════════════
+[2026-03-24 21:37:11.353] SYSTEM   | ═══ VBX Production HMI v3.0 Initialized ═══
+[2026-03-24 21:37:11.354] SYSTEM   | Modbus: 192.168.1.12 | Camera: 192.168.1.20 | Scanner: 192.168.1.54
+[2026-03-24 21:37:11.475] SYSTEM   | Auto-detecting devices...
+[2026-03-24 21:37:11.476] AUTO-DETECT: Starting device scan...
+[2026-03-24 21:37:11.477] DETECT   | Scanning Modbus at 192.168.1.12:502
+[2026-03-24 21:37:11.500] DETECT   | ✓ Modbus ONLINE at 192.168.1.12:502
+[2026-03-24 21:37:11.500] AUTO-DETECT: Modbus connected OK
+[2026-03-24 21:37:11.500] DETECT   | Scanning Cognex at 192.168.1.20:80
+[2026-03-24 21:37:11.505] DETECT   | ✓ Cognex ONLINE (response: HTTP/1.1 400 Bad Request
+Server: nginx
+Date: Wed, 02 Jan 2019 18:10:10 GMT
+Content-Type: text/html
+Content-Length: 150
+Connection: close
+
+<html>
+<head><title>400 Bad Request</title></head>
+<body>
+<center><h1>400 Bad Request</h1></center>
+<hr><center>nginx</center>
+</body>
+</html>)
+[2026-03-24 21:37:11.506] DETECT   | Scanning Keyence at 192.168.1.54:9004
+[2026-03-24 21:37:11.509] DETECT   | ✓ Keyence ONLINE at 192.168.1.54:9004
+[2026-03-24 21:37:11.509] AUTO-DETECT: Keyence TCP connected OK
+[2026-03-24 21:37:11.509] DETECT   | Scanning Camera at http://192.168.1.20/cam0/img/listIds
+[2026-03-24 21:37:11.547] DETECT   | ✗ Camera HTTP error (NotFound)
+[2026-03-24 21:37:11.547] AUTO-DETECT: Scan complete
+[2026-03-24 21:37:11.547] DETECT   | Device scan complete
+[2026-03-24 21:37:12.177] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:12.613] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:12.977] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:13.408] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:13.781] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:14.213] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:14.605] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:15.039] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:15.412] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:15.843] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:16.220] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:16.657] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:17.041] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:17.476] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:17.848] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:18.280] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:18.655] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:19.089] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:19.475] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:19.908] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:20.283] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:20.716] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:21.106] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:21.541] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:21.915] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:22.355] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:22.729] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:23.166] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:23.544] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:23.973] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:24.349] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:24.787] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:25.156] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:25.586] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:25.981] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:26.413] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:26.799] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:27.231] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:27.596] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:28.028] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:28.404] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:28.838] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:29.227] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:29.659] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:30.035] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:30.471] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:30.852] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:31.288] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:31.665] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:32.088] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:32.471] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:32.906] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:33.292] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:33.728] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:34.100] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:34.537] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:34.907] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:35.334] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:35.729] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:36.162] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:36.536] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:36.965] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:37.100] CYCLE    | ▶ Start — Clamp Cylinder Extend
+[2026-03-24 21:37:37.213] CLAMP    | ✓ Cylinder Extended — Scanning Barcode
+[2026-03-24 21:37:37.322] SCAN     | Acquiring Barcode...
+[2026-03-24 21:37:37.322] SCAN: === Starting scan on 192.168.1.54:9004 ===
+[2026-03-24 21:37:37.324] SCAN: Connected, trying cmd: [LON\r]
+[2026-03-24 21:37:37.341] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:37.773] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:38.164] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:38.598] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:38.972] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:39.408] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:39.781] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:40.214] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:40.605] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:41.041] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:41.413] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:41.849] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:42.222] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:42.657] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:43.030] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:43.464] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:43.465] SCAN: Result=[] len=0
+[2026-03-24 21:37:43.855] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:44.292] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:44.293] SCAN: Connected, trying cmd: [\r]
+[2026-03-24 21:37:44.662] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:45.096] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:45.473] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:45.905] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:46.279] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:46.715] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:47.105] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:47.537] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:47.911] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:48.340] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:48.717] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:49.151] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:49.542] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:49.975] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:50.170] SCAN: Result=[] len=0
+[2026-03-24 21:37:50.170] SCAN: All commands failed
+[2026-03-24 21:37:50.171] SCAN     | Read Failed — Retrying...
+[2026-03-24 21:37:50.349] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:50.785] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:50.805] SCAN     | Acquiring Barcode...
+[2026-03-24 21:37:50.805] SCAN: === Starting scan on 192.168.1.54:9004 ===
+[2026-03-24 21:37:50.806] SCAN: Connected, trying cmd: [LON\r]
+[2026-03-24 21:37:51.159] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:51.593] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:51.968] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:52.402] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:52.793] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:53.227] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:53.602] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:54.036] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:54.037] SCAN: +8B = [8614553\r]
+[2026-03-24 21:37:54.037] SCAN: Result=[8614553] len=7
+[2026-03-24 21:37:54.037] SCAN     | Barcode: 8614553
+[2026-03-24 21:37:54.059] VERIFY   | ✗ Wrong PWBA! Expected: VBX-001, Got: 8614553
+[2026-03-24 21:37:54.409] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:54.841] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:55.231] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:55.662] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:56.040] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:56.469] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:56.856] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:57.289] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:57.667] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:58.099] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:58.474] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:58.907] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:37:59.279] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:37:59.712] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:00.104] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:00.533] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:00.910] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:01.342] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:01.718] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:02.152] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:02.548] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:02.979] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:03.347] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:03.778] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:04.157] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:04.591] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:04.980] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:05.409] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:05.787] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:06.218] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:06.597] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:07.030] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:07.415] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:07.843] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:08.221] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:08.652] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:09.030] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:09.462] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:09.853] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:10.293] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:10.658] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:11.091] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:11.480] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:11.915] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:12.289] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:12.722] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:13.098] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:13.531] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:13.906] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:14.343] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:14.741] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:15.172] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:15.539] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:15.972] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:16.349] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:16.782] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:17.154] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:17.587] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:17.978] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:18.407] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:18.784] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:19.217] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:19.605] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:20.034] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:20.424] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:20.861] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:21.222] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:21.654] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:22.042] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:22.472] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:22.847] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:23.276] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:23.743] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:24.175] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:24.469] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:24.903] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:25.294] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:25.725] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:26.101] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:26.532] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:26.906] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:27.338] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:27.729] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:28.164] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:28.533] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:28.967] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:29.357] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:29.791] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:30.174] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:30.609] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:30.972] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:31.405] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:31.781] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:32.215] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:32.607] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:33.040] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:33.414] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:33.846] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:34.232] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:34.663] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:35.032] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:35.463] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:35.854] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:36.288] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:36.661] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:37.097] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:37.470] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:37.902] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:38.290] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:38.723] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:39.096] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:39.526] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:39.916] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:40.350] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:40.717] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:41.153] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:41.537] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:41.973] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:42.342] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:42.777] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:43.167] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:43.603] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:43.973] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:44.408] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:44.794] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:45.234] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:45.601] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:46.038] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:46.407] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:46.842] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:47.232] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:47.665] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:48.041] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:48.475] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:48.849] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:49.283] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:49.657] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:50.091] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:50.477] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:50.911] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:51.285] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:51.718] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:52.105] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:52.538] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:52.912] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:53.342] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:53.728] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:54.158] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:54.540] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:54.976] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:55.350] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:55.786] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:56.155] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:56.588] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:56.968] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:57.397] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:57.808] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:58.241] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:58.598] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:59.029] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:38:59.409] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:38:59.843] CAM-COGNEX: Got image ID 215 (4665704 bytes)
+[2026-03-24 21:39:00.216] CAM-COGNEX: listIds response: [215]
+[2026-03-24 21:39:00.649] CAM-COGNEX: Got image ID 215 (4665704 bytes)
