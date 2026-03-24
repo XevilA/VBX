@@ -517,7 +517,7 @@ Partial Class Form1
         }
 
         lblStateText = New Label With {
-            .Text = "SYSTEM IDLE", .ForeColor = CLR_PASS, .BackColor = Color.FromArgb(20, 52, 199, 89),
+            .Text = "SYSTEM IDLE", .ForeColor = CLR_PASS,
             .Font = New Font("Segoe UI", 18, FontStyle.Bold), .TextAlign = ContentAlignment.MiddleCenter,
             .Size = New Size(380, 52), .Anchor = AnchorStyles.None, .BackColor = Color.FromArgb(36, 38, 44)
         }
