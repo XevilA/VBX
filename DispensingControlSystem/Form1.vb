@@ -314,16 +314,18 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── CURTAIN_CHECK: Safety curtain (bypass for now — log only) ──
+            ' ── CURTAIN_CHECK: Safety curtain NC (I0.3=OFF=Safe, ON=Blocked) ──
             Case MachineStatus.CURTAIN_CHECK
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                If inputs(DI_CURTAIN) Then
-                    Log("SAFETY", "✓ Light Curtain Active (I0.3=ON)")
+                ' NC: OFF=safe (closed), ON=obstruction (opened)
+                If Not inputs(DI_CURTAIN) Then
+                    Log("SAFETY", "✓ Light Curtain OK (I0.3=OFF, NC safe)")
+                    currentState = MachineStatus.DISPENSE_START
                 Else
-                    Log("SAFETY", "⚠ Light Curtain I0.3=OFF — Bypassed (check wiring)")
+                    alarmMessage = "Light Curtain BLOCKED (I0.3=ON)"
+                    Log("SAFETY", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
                 End If
-                ' Always proceed — curtain bypass enabled
-                currentState = MachineStatus.DISPENSE_START
 
             ' ── DISPENSE_START: Send program + robot start ──
             Case MachineStatus.DISPENSE_START
@@ -353,9 +355,9 @@ Partial Class Form1
             ' ── DISPENSE_RUNNING: Wait robot complete ──
             Case MachineStatus.DISPENSE_RUNNING
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                ' Safety: check curtain during dispensing
-                If Not inputs(DI_CURTAIN) Then
-                    alarmMessage = "Light Curtain Interrupted During Dispensing!"
+                ' Safety: NC curtain — ON means obstruction
+                If inputs(DI_CURTAIN) Then
+                    alarmMessage = "Light Curtain BLOCKED During Dispensing! (I0.3=ON)"
                     Log("SAFETY", alarmMessage)
                     outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause robot
                     currentState = MachineStatus.EMERGENCY_STOP
