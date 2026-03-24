@@ -144,7 +144,7 @@ Partial Class Form1
     Private lblStatsPass, lblStatsFail, lblStatsTime, lblStatsYield As Label
     Private cbProgramSelect As ComboBox
     Private isModbusLive, isVisionLive, isScannerLive, isProcessing, isNetWorking As Boolean
-    Private Shared httpClient As New System.Net.Http.HttpClient() With {.Timeout = TimeSpan.FromSeconds(3)}
+    Private Shared httpClient As New System.Net.Http.HttpClient() With {.Timeout = TimeSpan.FromSeconds(5)}
     Private modbusReconnectCooldown As Integer = 0
     Private cameraNoSignalBmp As Bitmap
     Private logoCached As Image
@@ -399,8 +399,8 @@ Partial Class Form1
         DebugLog($"SCAN: Connecting to {config.KeyenceIP}:{config.KeyencePort}")
         Try
             Using client As New TcpClient()
-                client.ReceiveTimeout = 3000
-                client.SendTimeout = 2000
+                client.ReceiveTimeout = 5000
+                client.SendTimeout = 3000
                 Dim connectTask = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
                 If Await Task.WhenAny(connectTask, Task.Delay(3000)) IsNot connectTask Then
                     DebugLog("SCAN: Connection timeout")
@@ -408,40 +408,68 @@ Partial Class Form1
                 End If
                 Await connectTask
                 DebugLog("SCAN: TCP connected")
+                isScannerLive = True
+
                 Using stream = client.GetStream()
-                    Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCr)
+                    ' Try LON command with CR+LF (some Keyence models need this)
+                    Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCrLf)
                     Await stream.WriteAsync(cmd, 0, cmd.Length)
                     DebugLog("SCAN: Sent LON command")
-                    Await Task.Delay(300)
+
+                    ' Wait for scanner to acquire and respond
+                    Await Task.Delay(500)
+
+                    ' Read with extended attempts
                     Dim fullResponse As String = ""
                     Dim buffer(4096) As Byte
                     Dim attempts = 0
-                    While attempts < 5
+                    Dim maxAttempts = 10
+
+                    While attempts < maxAttempts
                         If stream.DataAvailable Then
                             Dim bytesRead = Await stream.ReadAsync(buffer, 0, buffer.Length)
                             If bytesRead > 0 Then
                                 fullResponse &= Encoding.ASCII.GetString(buffer, 0, bytesRead)
-                                DebugLog($"SCAN: Read {bytesRead} bytes: [{fullResponse.Trim()}]")
+                                DebugLog($"SCAN: Read {bytesRead} bytes: [{fullResponse.Replace(vbCr, "\r").Replace(vbLf, "\n")}]")
                             End If
-                            If fullResponse.Contains(vbCr) OrElse fullResponse.Contains(vbLf) Then Exit While
+                            ' Check if we got a complete response
+                            If fullResponse.Contains(vbCr) OrElse fullResponse.Contains(vbLf) OrElse fullResponse.Length > 3 Then
+                                Exit While
+                            End If
                         Else
-                            Await Task.Delay(200)
+                            Await Task.Delay(300)
                         End If
                         attempts += 1
                     End While
-                    cmd = Encoding.ASCII.GetBytes("LOFF" & vbCr)
+
+                    ' Send LOFF to stop scanner
+                    cmd = Encoding.ASCII.GetBytes("LOFF" & vbCrLf)
                     Await stream.WriteAsync(cmd, 0, cmd.Length)
-                    DebugLog("SCAN: Sent LOFF command")
-                    Dim result = fullResponse.Trim().Replace(vbCr, "").Replace(vbLf, "")
-                    If result.StartsWith("LON") Then result = result.Substring(3).Trim()
-                    DebugLog($"SCAN: Final barcode = [{result}]")
-                    If String.IsNullOrWhiteSpace(result) Then Return "ERROR"
+                    DebugLog("SCAN: Sent LOFF")
+
+                    ' Clean up response
+                    Dim result = fullResponse.Trim()
+                    result = result.Replace(vbCr, "").Replace(vbLf, "")
+                    ' Strip echo if present
+                    If result.StartsWith("LON", StringComparison.OrdinalIgnoreCase) Then
+                        result = result.Substring(3).Trim()
+                    End If
+                    ' Remove any control chars
+                    result = New String(result.Where(Function(c) Not Char.IsControl(c)).ToArray()).Trim()
+
+                    DebugLog($"SCAN: Final barcode = [{result}] (len={result.Length})")
+
+                    If String.IsNullOrWhiteSpace(result) Then
+                        DebugLog("SCAN: Empty response after cleanup")
+                        Return "ERROR"
+                    End If
                     Return result
                 End Using
             End Using
         Catch ex As Exception
             DebugLog($"SCAN-ERR: {ex.GetType().Name}: {ex.Message}")
             Log("SCAN", $"Scanner Error: {ex.Message}")
+            isScannerLive = False
             Return "ERROR"
         End Try
     End Function
@@ -543,28 +571,53 @@ Partial Class Form1
             Dim source = If(Not String.IsNullOrWhiteSpace(config.CameraSourcePath), config.CameraSourcePath, config.CameraUrl)
 
             If source.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase) Then
-                ' FTP source
                 bmp = Await Task.Run(Function() FetchImageFromFtp(source))
-                DebugLog($"CAM-FTP: Fetched from {source}")
             ElseIf source.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) Then
                 bmp = Await Task.Run(Function() FetchImageFromTcp(source))
-                DebugLog($"CAM-TCP: Fetched from {source}")
             ElseIf source.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
-                ' HTTP source (default)
-                Dim data = Await httpClient.GetByteArrayAsync(source)
-                Using ms As New IO.MemoryStream(data) : bmp = New Bitmap(ms) : End Using
-                DebugLog($"CAM-HTTP: Fetched from {source}")
+                ' Use WebClient (HTTP/1.0 compatible — Cognex embedded server rejects HttpClient HTTP/1.1)
+                Dim urls As New List(Of String) From {source}
+                Dim baseUrl = $"http://{config.CognexIP}"
+                If Not urls.Contains($"{baseUrl}/img/snapshot.jpg") Then urls.Add($"{baseUrl}/img/snapshot.jpg")
+                If Not urls.Contains($"{baseUrl}/CgiImage?img=snapshot.bmp") Then urls.Add($"{baseUrl}/CgiImage?img=snapshot.bmp")
+                If Not urls.Contains($"{baseUrl}/CgiSnapshot") Then urls.Add($"{baseUrl}/CgiSnapshot")
+                If Not urls.Contains($"{baseUrl}/liveimg.cgi?imgformat=jpg") Then urls.Add($"{baseUrl}/liveimg.cgi?imgformat=jpg")
+                If Not urls.Contains($"{baseUrl}/api/image/snapshot") Then urls.Add($"{baseUrl}/api/image/snapshot")
+                If Not urls.Contains($"{baseUrl}/snapshot.jpg") Then urls.Add($"{baseUrl}/snapshot.jpg")
+                If Not urls.Contains($"{baseUrl}/image.jpg") Then urls.Add($"{baseUrl}/image.jpg")
+
+                For Each url In urls
+                    Try
+                        Dim data As Byte() = Nothing
+                        Await Task.Run(Sub()
+                            Using wc As New System.Net.WebClient()
+                                wc.Headers.Add("User-Agent", "VBX/3.0")
+                                data = wc.DownloadData(url)
+                            End Using
+                        End Sub)
+                        If data IsNot Nothing AndAlso data.Length > 100 Then
+                            Using ms As New IO.MemoryStream(data)
+                                bmp = New Bitmap(ms)
+                            End Using
+                            If url <> config.CameraUrl Then
+                                config.CameraUrl = url
+                                SaveSettings()
+                                Log("CAMERA", $"Auto-detected working URL: {url}")
+                            End If
+                            Exit For
+                        End If
+                    Catch urlEx As Exception
+                        DebugLog($"CAM-TRY: {url} -> {urlEx.Message}")
+                    End Try
+                Next
             ElseIf IO.File.Exists(source) Then
-                ' Local or network file path
                 bmp = Await Task.Run(Function()
                     Using fs = New IO.FileStream(source, IO.FileMode.Open, IO.FileAccess.Read, IO.FileShare.ReadWrite)
                         Return New Bitmap(fs)
                     End Using
                 End Function)
-                DebugLog($"CAM-FILE: Loaded from {source}")
             Else
-                DebugLog($"CAM-ERR: Unknown source: {source}")
-                Throw New Exception("Invalid camera source")
+                Throw New Exception($"Invalid camera source: {source}")
             End If
 
             If bmp IsNot Nothing Then
@@ -574,16 +627,20 @@ Partial Class Form1
                     End If
                     picCameraPreview.Image = bmp
                 End Sub)
+                isVisionLive = True
+                UpdateCameraOverlay(True)
+            Else
+                Throw New Exception("No image data received")
             End If
-            isVisionLive = True
-            UpdateCameraOverlay(True)
         Catch ex As Exception
             DebugLog($"CAM-ERR: {ex.Message}")
             isVisionLive = False
-            picCameraPreview.Invoke(Sub()
-                If picCameraPreview.Image Is Nothing OrElse picCameraPreview.Image Is cameraNoSignalBmp Then Return
-                picCameraPreview.Image = cameraNoSignalBmp
-            End Sub)
+            Try
+                picCameraPreview.Invoke(Sub()
+                    If picCameraPreview.Image Is Nothing OrElse picCameraPreview.Image Is cameraNoSignalBmp Then Return
+                    picCameraPreview.Image = cameraNoSignalBmp
+                End Sub)
+            Catch : End Try
             UpdateCameraOverlay(False)
         End Try
     End Sub
