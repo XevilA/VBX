@@ -1606,6 +1606,10 @@ Partial Class Form1
                     End If
                 Catch ex As Exception
                     appendDebug($"✗ Cognex API failed: {ex.Message}")
+                End Try
+
+                ' Fallback if no image yet
+                If picPreview.Image Is Nothing Then
                     Dim fallbacks = {
                         $"http://{config.CognexIP}/img/snapshot.jpg",
                         $"http://{config.CognexIP}/CgiSnapshot",
@@ -1631,7 +1635,7 @@ Partial Class Form1
                             appendDebug($"✗ {url}: {urlEx.Message}")
                         End Try
                     Next
-                End Try
+                End If
                 btnTestCam.Enabled = True
                 btnTestCam.Text = "📷  Test Camera"
             End Sub
