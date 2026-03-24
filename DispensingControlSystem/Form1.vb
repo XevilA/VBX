@@ -75,10 +75,10 @@ Partial Class Form1
     Private Const DO_PROG_BIT1 As Integer = 9     ' Q1.1  Program bit1 (2^1=2)
     Private Const DO_PROG_BIT2 As Integer = 10    ' Q1.2  Program bit2 (2^2=4)
     Private Const DO_PROG_BIT3 As Integer = 11    ' Q1.3  Program bit3 (2^3=8)
-    Private Const DO_CLAMP As Integer = 12        ' Q1.4  Cylinder Clamp 1
-    Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Clamp 2
-    Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  Cylinder Clamp 3
-    Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Clamp 4
+    Private Const DO_CLAMP As Integer = 12        ' Q1.4  (DI sensor — do not write)
+    Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Clamp Extend (DO)
+    Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  (DI sensor — do not write)
+    Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Clamp Extend (DO)
 #End Region
 
 #Region "Machine State System"
@@ -107,6 +107,7 @@ Partial Class Form1
     Private outputs(15) As Boolean
     Private isEStopActive As Boolean = False
     Private isPaused As Boolean = False
+    Private scanRetryCount As Integer = 0
     Private isSoftwareStartRequested As Boolean = False
     Private isSoftwareResetRequested As Boolean = False
     Private cycleDuration As Double = 0
@@ -173,7 +174,9 @@ Partial Class Form1
         If triggerReset Then
             currentState = MachineStatus.IDLE
             isEStopActive = False
+            isPaused = False
             alarmMessage = ""
+            lastBarcode = ""
             ResetOutputs()
             Log("SYSTEM", "Manual Reset Initiated")
             Return
@@ -194,11 +197,9 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = True        ' Green = Ready
                 If triggerStart Then
                     cycleStartTime = DateTime.Now
-                    ' Lock: Push clamp IN (double-acting cylinder)
-                    outputs(DO_CLAMP) = False      ' 1 OFF (retract side)
-                    outputs(DO_CLAMP2) = True       ' 2 ON  (extend side)
-                    outputs(DO_CLAMP3) = False      ' 3 OFF (retract side)
-                    outputs(DO_CLAMP4) = True       ' 4 ON  (extend side)
+                    ' Lock: Clamp extend — only Q1.5 + Q1.7 are DO outputs
+                    outputs(DO_CLAMP2) = True
+                    outputs(DO_CLAMP4) = True
                     Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
@@ -219,12 +220,22 @@ Partial Class Form1
                 If Not String.IsNullOrEmpty(barcode) AndAlso barcode <> "ERROR" AndAlso barcode <> "ER" AndAlso barcode <> "TIMEOUT" Then
                     lastBarcode = barcode
                     isScannerLive = True
+                    scanRetryCount = 0
                     Log("SCAN", $"Barcode: {barcode}")
                     currentState = MachineStatus.MODEL_CHECK
                 Else
+                    scanRetryCount += 1
                     isScannerLive = False
-                    Log("SCAN", "Read Failed — Retrying...")
-                    Await Task.Delay(500)
+                    If scanRetryCount >= 3 Then
+                        ' After 3 failures, stop and go to MODEL_FAIL
+                        alarmMessage = "Scanner read failed after 3 attempts"
+                        Log("SCAN", "✗ " & alarmMessage)
+                        scanRetryCount = 0
+                        currentState = MachineStatus.MODEL_FAIL
+                    Else
+                        Log("SCAN", $"Read Failed — Retry {scanRetryCount}/3...")
+                        Await Task.Delay(500)
+                    End If
                 End If
 
             ' ── MODEL_CHECK: Flowchart Phase 3 ─ Check barcode vs Master ──
@@ -250,11 +261,9 @@ Partial Class Form1
                 ' Wait for operator press Start to acknowledge
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged — Retracting")
-                    ' Unlock: Push clamp OUT (1 & 3)
+                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
                     outputs(DO_CLAMP2) = False
                     outputs(DO_CLAMP4) = False
-                    outputs(DO_CLAMP) = True
-                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.MODEL_FAIL_RETRACT
                 End If
 
@@ -264,6 +273,7 @@ Partial Class Form1
                     outputs(DO_LIGHT_RED) = False
                     outputs(DO_LIGHT_GRN) = True
                     alarmMessage = ""
+                    lastBarcode = ""
                     Log("CLAMP", "✓ Retracted — Remove Part")
                     config.FailCount += 1 : SaveSettings()
                     currentState = MachineStatus.IDLE
@@ -334,11 +344,9 @@ Partial Class Form1
                     lastVisionResult = "PASS"
                     config.PassCount += 1 : SaveSettings()
                     UpdateScanHistoryStatus(lastBarcode, "✅ PASS")
-                    ' Unlock: Push clamp OUT (1 & 3)
+                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
                     outputs(DO_CLAMP2) = False
                     outputs(DO_CLAMP4) = False
-                    outputs(DO_CLAMP) = True
-                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.VISION_OK_RETRACT
                 Else
                     Log("VISION", "✗ Inspection FAILED")
@@ -364,11 +372,9 @@ Partial Class Form1
                 alarmMessage = "Vision Inspection FAILED — NG"
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged NG — Retracting")
-                    ' Unlock: Push clamp OUT (1 & 3)
+                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
                     outputs(DO_CLAMP2) = False
                     outputs(DO_CLAMP4) = False
-                    outputs(DO_CLAMP) = True
-                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.VISION_NG_RETRACT
                 End If
 
