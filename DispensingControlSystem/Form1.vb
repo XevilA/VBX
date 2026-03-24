@@ -136,7 +136,7 @@ Partial Class Form1
     Private picCameraPreview As PictureBox
     Private pnlCameraOverlay As Panel
     Private lblCameraStatus, lblVisionOverlay As Label
-    Private btnStart, btnReset, btnPause, btnConfig, btnExport, btnExit As Button
+    Private btnStart, btnReset, btnPause, btnConfig, btnExport, btnDev, btnExit As Button
     Private indModbus, indVision, indScanner As Panel
     Private lblIndModbus, lblIndVision, lblIndScanner As Label
     Private logDisplay As ListBox
@@ -397,10 +397,9 @@ Partial Class Form1
 #Region "Hardware Handlers"
     Private Async Function ReadBarcodeAsync() As Task(Of String)
         DebugLog($"SCAN: === Starting scan on {config.KeyenceIP}:{config.KeyencePort} ===")
-        ' Try multiple command formats to support different Keyence models
+        ' Keyence works with CR only (\r) — NOT CRLF
         Dim commands = {
             "LON" & vbCr,
-            "LON" & vbCrLf,
             vbCr
         }
         For Each cmdStr In commands
@@ -1213,8 +1212,9 @@ Partial Class Form1
         End Sub
         btnConfig = CreateActionBtn("⚙  CONFIG", "F5", Color.FromArgb(70, 70, 80)) : AddHandler btnConfig.Click, Sub() ShowConfigDialog()
         btnExport = CreateActionBtn("📄  LOG", "F6", Color.FromArgb(50, 80, 120)) : AddHandler btnExport.Click, Sub() ExportDebugLog()
+        btnDev = CreateActionBtn("🔧  DEV", "F7", Color.FromArgb(120, 60, 20)) : AddHandler btnDev.Click, Sub() ShowDevModeDialog()
         btnExit = CreateActionBtn("✕  EXIT", "ESC", CLR_DANGER) : AddHandler btnExit.Click, Sub() Application.Exit()
-        flpBtns.Controls.AddRange({btnStart, btnReset, btnPause, btnConfig, btnExport, btnExit})
+        flpBtns.Controls.AddRange({btnStart, btnReset, btnPause, btnConfig, btnExport, btnDev, btnExit})
 
         pnlFooter.Controls.Add(flpBtns)
     End Sub
@@ -1505,6 +1505,233 @@ Partial Class Form1
     End Sub
 #End Region
 
+#Region "Dev Mode — Direct Hardware Test"
+    Private Sub ShowDevModeDialog()
+        Using dlg As New Form With {
+            .Text = "🔧 DEV MODE — Hardware Test",
+            .Size = New Size(900, 700),
+            .StartPosition = FormStartPosition.CenterParent,
+            .BackColor = Color.FromArgb(25, 25, 30),
+            .ForeColor = Color.White,
+            .Font = New Font("Consolas", 10),
+            .FormBorderStyle = FormBorderStyle.FixedDialog,
+            .MaximizeBox = False
+        }
+            ' === Title ===
+            Dim lblTitle As New Label With {
+                .Text = "🔧 DEV MODE — Camera & Scanner Direct Test",
+                .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = Color.FromArgb(255, 180, 50),
+                .Dock = DockStyle.Top, .Height = 40, .TextAlign = ContentAlignment.MiddleCenter
+            }
+
+            ' === Debug Output ===
+            Dim txtDebug As New TextBox With {
+                .Multiline = True, .ScrollBars = ScrollBars.Vertical, .ReadOnly = True,
+                .BackColor = Color.FromArgb(15, 15, 20), .ForeColor = Color.Lime,
+                .Font = New Font("Consolas", 9),
+                .Dock = DockStyle.Bottom, .Height = 220
+            }
+
+            ' === Camera Preview ===
+            Dim picPreview As New PictureBox With {
+                .Size = New Size(400, 300),
+                .Location = New Point(20, 50),
+                .BackColor = Color.Black,
+                .SizeMode = PictureBoxSizeMode.Zoom,
+                .BorderStyle = BorderStyle.FixedSingle
+            }
+
+            ' === Scanner Result ===
+            Dim lblScanResult As New Label With {
+                .Text = "[No scan yet]",
+                .Font = New Font("Segoe UI", 16, FontStyle.Bold),
+                .ForeColor = Color.Cyan,
+                .Location = New Point(450, 200),
+                .Size = New Size(420, 60),
+                .TextAlign = ContentAlignment.MiddleCenter,
+                .BackColor = Color.FromArgb(30, 30, 40)
+            }
+
+            ' Helper to append debug text
+            Dim appendDebug As Action(Of String) = Sub(msg)
+                Try
+                    txtDebug.Invoke(Sub()
+                        txtDebug.AppendText($"[{DateTime.Now:HH:mm:ss.fff}] {msg}" & vbCrLf)
+                        txtDebug.SelectionStart = txtDebug.TextLength
+                        txtDebug.ScrollToCaret()
+                    End Sub)
+                Catch : End Try
+            End Sub
+
+            ' === Test Camera Button ===
+            Dim btnTestCam As New Button With {
+                .Text = "📷  Test Camera", .Size = New Size(200, 50),
+                .Location = New Point(450, 60),
+                .BackColor = Color.FromArgb(40, 100, 60), .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 12, FontStyle.Bold)
+            }
+            AddHandler btnTestCam.Click, Async Sub()
+                btnTestCam.Enabled = False
+                btnTestCam.Text = "⏳  Testing..."
+                appendDebug("=== CAMERA TEST START ===")
+                appendDebug($"CognexIP: {config.CognexIP}  Port: {config.CognexPort}")
+                Try
+                    Dim baseUrl = $"http://{config.CognexIP}"
+                    appendDebug($"POST {baseUrl}/cam0/img/listIds")
+                    Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
+                    listReq.Method = "POST" : listReq.ContentType = "application/json"
+                    listReq.ContentLength = 0 : listReq.Timeout = 5000
+                    Dim imgId = ""
+                    Using resp = Await Task.Run(Function() listReq.GetResponse())
+                        Using sr As New IO.StreamReader(resp.GetResponseStream())
+                            Dim body = sr.ReadToEnd().Trim()
+                            appendDebug($"Response: {body}")
+                            Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
+                            If nums.Length > 0 Then imgId = nums(0).Trim()
+                        End Using
+                    End Using
+                    If Not String.IsNullOrEmpty(imgId) Then
+                        appendDebug($"GET {baseUrl}/cam0/img/{imgId}")
+                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}"), System.Net.HttpWebRequest)
+                        imgReq.Timeout = 5000
+                        Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
+                            Using ms As New IO.MemoryStream()
+                                imgResp.GetResponseStream().CopyTo(ms)
+                                ms.Position = 0
+                                picPreview.Image = New Bitmap(ms)
+                                appendDebug($"✓ Camera OK! Image: {ms.Length} bytes")
+                            End Using
+                        End Using
+                    End If
+                Catch ex As Exception
+                    appendDebug($"✗ Cognex API failed: {ex.Message}")
+                    Dim fallbacks = {
+                        $"http://{config.CognexIP}/img/snapshot.jpg",
+                        $"http://{config.CognexIP}/CgiSnapshot",
+                        $"http://{config.CognexIP}/snapshot.jpg"
+                    }
+                    For Each url In fallbacks
+                        Try
+                            appendDebug($"Trying: {url}")
+                            Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
+                            req.Timeout = 3000 : req.UserAgent = "VBX/3.0"
+                            Using resp = Await Task.Run(Function() req.GetResponse())
+                                Using ms As New IO.MemoryStream()
+                                    resp.GetResponseStream().CopyTo(ms)
+                                    If ms.Length > 100 Then
+                                        ms.Position = 0
+                                        picPreview.Image = New Bitmap(ms)
+                                        appendDebug($"✓ OK via {url} ({ms.Length} bytes)")
+                                        Exit For
+                                    End If
+                                End Using
+                            End Using
+                        Catch urlEx As Exception
+                            appendDebug($"✗ {url}: {urlEx.Message}")
+                        End Try
+                    Next
+                End Try
+                btnTestCam.Enabled = True
+                btnTestCam.Text = "📷  Test Camera"
+            End Sub
+
+            ' === Test Scanner Button ===
+            Dim btnTestScan As New Button With {
+                .Text = "📟  Test Scanner", .Size = New Size(200, 50),
+                .Location = New Point(450, 130),
+                .BackColor = Color.FromArgb(40, 60, 100), .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 12, FontStyle.Bold)
+            }
+            AddHandler btnTestScan.Click, Async Sub()
+                btnTestScan.Enabled = False
+                btnTestScan.Text = "⏳  Scanning..."
+                lblScanResult.Text = "Scanning..."
+                lblScanResult.ForeColor = Color.Yellow
+                appendDebug("=== SCANNER TEST START ===")
+                appendDebug($"KeyenceIP: {config.KeyenceIP}  Port: {config.KeyencePort}")
+                Try
+                    Using client As New TcpClient()
+                        client.ReceiveTimeout = 5000 : client.SendTimeout = 3000
+                        appendDebug("Connecting...")
+                        Dim ct = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
+                        If Await Task.WhenAny(ct, Task.Delay(3000)) IsNot ct Then
+                            appendDebug("✗ Connection timeout")
+                            lblScanResult.Text = "TIMEOUT" : lblScanResult.ForeColor = Color.Red
+                            btnTestScan.Enabled = True : btnTestScan.Text = "📟  Test Scanner"
+                            Return
+                        End If
+                        Await ct
+                        appendDebug("✓ TCP connected")
+
+                        Using stream = client.GetStream()
+                            Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCr)
+                            Await stream.WriteAsync(cmd, 0, cmd.Length)
+                            appendDebug("Sent: LON\r")
+
+                            Dim fullResp = ""
+                            Dim buf(4096) As Byte
+                            Dim waited = 0
+                            While waited < 5000
+                                If stream.DataAvailable Then
+                                    Dim n = Await stream.ReadAsync(buf, 0, buf.Length)
+                                    If n > 0 Then
+                                        Dim chunk = Encoding.ASCII.GetString(buf, 0, n)
+                                        fullResp &= chunk
+                                        appendDebug($"+{n}B: [{chunk.Replace(vbCr, "\r").Replace(vbLf, "\n")}]")
+                                        If fullResp.Length > 3 Then Exit While
+                                    End If
+                                Else
+                                    Await Task.Delay(200)
+                                    waited += 200
+                                End If
+                            End While
+
+                            cmd = Encoding.ASCII.GetBytes("LOFF" & vbCr)
+                            Await stream.WriteAsync(cmd, 0, cmd.Length)
+                            appendDebug("Sent: LOFF\r")
+
+                            Dim result = New String(fullResp.Where(Function(c) Not Char.IsControl(c)).ToArray()).Trim()
+                            If result.StartsWith("LON", StringComparison.OrdinalIgnoreCase) Then result = result.Substring(3).Trim()
+                            appendDebug($"Result: [{result}] (len={result.Length})")
+
+                            If Not String.IsNullOrWhiteSpace(result) AndAlso result.Length >= 2 Then
+                                lblScanResult.Text = result
+                                lblScanResult.ForeColor = Color.Lime
+                                appendDebug($"✓ Barcode OK: {result}")
+                            Else
+                                lblScanResult.Text = If(String.IsNullOrEmpty(result), "[empty]", result)
+                                lblScanResult.ForeColor = Color.Red
+                                appendDebug("✗ No valid barcode")
+                            End If
+                        End Using
+                    End Using
+                Catch ex As Exception
+                    appendDebug($"✗ Scanner error: {ex.Message}")
+                    lblScanResult.Text = "ERROR" : lblScanResult.ForeColor = Color.Red
+                End Try
+                btnTestScan.Enabled = True
+                btnTestScan.Text = "📟  Test Scanner"
+            End Sub
+
+            ' === Close Button ===
+            Dim btnClose As New Button With {
+                .Text = "Close", .Size = New Size(200, 40),
+                .Location = New Point(450, 310),
+                .BackColor = Color.FromArgb(60, 60, 70), .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI", 11),
+                .DialogResult = DialogResult.Cancel
+            }
+
+            Dim lblCam As New Label With {.Text = "Camera Preview:", .Location = New Point(20, 35), .AutoSize = True, .ForeColor = Color.Silver}
+            Dim lblScan As New Label With {.Text = "Scanner Result:", .Location = New Point(450, 180), .AutoSize = True, .ForeColor = Color.Silver}
+
+            dlg.Controls.AddRange({lblTitle, picPreview, lblCam, btnTestCam, btnTestScan, lblScan, lblScanResult, btnClose, txtDebug})
+            dlg.ShowDialog(Me)
+        End Using
+    End Sub
+#End Region
+
 #Region "Export Debug Log"
     Private Sub ExportDebugLog()
         Try
@@ -1542,6 +1769,7 @@ Partial Class Form1
             Case Keys.F3 : isPaused = Not isPaused : Return True
             Case Keys.F5 : ShowConfigDialog() : Return True
             Case Keys.F6 : ExportDebugLog() : Return True
+            Case Keys.F7 : ShowDevModeDialog() : Return True
             Case Keys.Escape : Application.Exit() : Return True
         End Select
         Return MyBase.ProcessCmdKey(msg, keyData)
