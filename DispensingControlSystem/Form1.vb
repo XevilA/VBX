@@ -317,11 +317,12 @@ Partial Class Form1
             ' ── CURTAIN_CHECK: Safety curtain must be active ──
             Case MachineStatus.CURTAIN_CHECK
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
+                DebugLog($"CURTAIN: I0.3={inputs(DI_CURTAIN)} State={currentState}")
                 If inputs(DI_CURTAIN) Then
-                    Log("SAFETY", "✓ Light Curtain Active")
+                    Log("SAFETY", "✓ Light Curtain Active (I0.3=ON)")
                     currentState = MachineStatus.DISPENSE_START
                 Else
-                    alarmMessage = "Safety Light Curtain NOT Active (I0.3)"
+                    alarmMessage = "Safety Light Curtain NOT Active (I0.3=OFF)"
                     Log("SAFETY", alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
                 End If
@@ -330,13 +331,25 @@ Partial Class Form1
             Case MachineStatus.DISPENSE_START
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 outputs(DO_LIGHT_YEL) = True
+                ' Step 1: Set program bits (Q1.0-Q1.3)
                 UpdateProgramBits()
-                outputs(DO_PROG_LOAD) = True         ' Q0.7 LOAD
-                Await Task.Delay(200)
-                outputs(DO_ROBOT_START) = True       ' Q0.5 Robot Start pulse
+                Dim progNum = cbProgramSelect.SelectedIndex + 1
+                Log("ROBOT", $"Program bits set: {progNum} [Q1.0={outputs(DO_PROG_BIT0)} Q1.1={outputs(DO_PROG_BIT1)} Q1.2={outputs(DO_PROG_BIT2)} Q1.3={outputs(DO_PROG_BIT3)}]")
+                ' Step 2: LOAD signal ON (Q0.7)
+                outputs(DO_PROG_LOAD) = True
+                ' Write outputs to Modbus so hardware sees program bits + LOAD
+                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
+                Log("ROBOT", "Q0.7 LOAD=ON → Waiting 300ms...")
+                Await Task.Delay(300)
+                ' Step 3: Robot Start pulse (Q0.5 ON for 500ms)
+                outputs(DO_ROBOT_START) = True
+                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
+                Log("ROBOT", "Q0.5 START=ON → Pulse 500ms...")
                 Await Task.Delay(500)
                 outputs(DO_ROBOT_START) = False
-                Log("ROBOT", $"▶ Dispensing Program {cbProgramSelect.SelectedIndex + 1} Started")
+                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
+                Log("ROBOT", $"▶ Dispensing Program {progNum} Started — Q0.5=OFF, waiting I0.5 complete")
+                DebugLog($"ROBOT-IO: LOAD={outputs(DO_PROG_LOAD)} START={outputs(DO_ROBOT_START)} RUNNING={inputs(DI_ROBOT_RUN)} DONE={inputs(DI_ROBOT_DONE)} FAULT={inputs(DI_ROBOT_FAULT)}")
                 currentState = MachineStatus.DISPENSE_RUNNING
 
             ' ── DISPENSE_RUNNING: Wait robot complete ──
