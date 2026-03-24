@@ -18,7 +18,7 @@ Partial Class Form1
     Private Const DEFAULT_MODBUS_IP As String = "192.168.1.12"
     Private Const DEFAULT_MODBUS_PORT As Integer = 502
     Private Const DEFAULT_COGNEX_IP As String = "192.168.1.20"
-    Private Const DEFAULT_COGNEX_PORT As Integer = 23
+    Private Const DEFAULT_COGNEX_PORT As Integer = 80
     Private Const DEFAULT_KEYENCE_IP As String = "192.168.1.54"
     Private Const DEFAULT_KEYENCE_PORT As Integer = 23
 
