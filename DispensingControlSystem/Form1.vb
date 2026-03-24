@@ -58,8 +58,8 @@ Partial Class Form1
     Private Const DI_VISION_OK As Integer = 7     ' I0.7  Vision OK (Cognex)
     Private Const DI_VISION_NG As Integer = 8     ' I1.0  Vision NG (Cognex)
     Private Const DI_CYL_EXT As Integer = 9       ' I1.1  Cylinder Extend Sensor 1
-    Private Const DI_CYL_EXT2 As Integer = 10     ' I1.2  Cylinder Extend Sensor 2
-    Private Const DI_CYL_RET As Integer = 11      ' I1.3  Cylinder Retract Sensor 1
+    Private Const DI_CYL_EXT2 As Integer = 11     ' I1.3  Cylinder Extend Sensor 2
+    Private Const DI_CYL_RET As Integer = 10      ' I1.2  Cylinder Retract Sensor 1
     Private Const DI_CYL_RET2 As Integer = 12     ' I1.4  Cylinder Retract Sensor 2
 
     ' ── OUTPUTS (Coils to Modbus) ──
@@ -75,10 +75,10 @@ Partial Class Form1
     Private Const DO_PROG_BIT1 As Integer = 9     ' Q1.1  Program bit1 (2^1=2)
     Private Const DO_PROG_BIT2 As Integer = 10    ' Q1.2  Program bit2 (2^2=4)
     Private Const DO_PROG_BIT3 As Integer = 11    ' Q1.3  Program bit3 (2^3=8)
-    Private Const DO_CLAMP As Integer = 12        ' Q1.4  (DI sensor — do not write)
-    Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Clamp Extend (DO)
-    Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  (DI sensor — do not write)
-    Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Clamp Extend (DO)
+    Private Const DO_CLAMP As Integer = 12        ' Q1.4  Cylinder Retract 1 (unlock)
+    Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Extend 2  (lock)
+    Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  Cylinder Retract 3 (unlock)
+    Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Extend 4  (lock)
 #End Region
 
 #Region "Machine State System"
@@ -108,6 +108,7 @@ Partial Class Form1
     Private isEStopActive As Boolean = False
     Private isPaused As Boolean = False
     Private scanRetryCount As Integer = 0
+    Private clampStartTime As DateTime = DateTime.Now
     Private isSoftwareStartRequested As Boolean = False
     Private isSoftwareResetRequested As Boolean = False
     Private cycleDuration As Double = 0
@@ -197,24 +198,36 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = True        ' Green = Ready
                 If triggerStart Then
                     cycleStartTime = DateTime.Now
-                    ' Lock: Clamp extend — only Q1.5 + Q1.7 are DO outputs
-                    outputs(DO_CLAMP2) = True
-                    outputs(DO_CLAMP4) = True
+                    clampStartTime = DateTime.Now
+                    ' Lock: Extend ON (Q1.5+Q1.7), Retract OFF (Q1.4+Q1.6)
+                    outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
+                    outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
                     Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-            ' ── CLAMP_EXTEND: Wait cylinder extend sensor ──
+            ' ── CLAMP_EXTEND: Keep clamp ON, wait cylinder extend sensor ──
             Case MachineStatus.CLAMP_EXTEND
+                ' MUST keep clamp Lock outputs ON every cycle
+                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
+                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
                 outputs(DO_LIGHT_GRN) = False
+                outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
                 If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                    outputs(DO_LIGHT_YEL) = True     ' Yellow = Busy
                     Log("CLAMP", "✓ Cylinder Extended — Scanning Barcode")
+                    currentState = MachineStatus.SCANNING
+                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
+                    ' Timeout: sensor never triggered — proceed anyway
+                    Log("CLAMP", "⚠ Extend sensor timeout (10s) — Proceeding to scan")
                     currentState = MachineStatus.SCANNING
                 End If
 
             ' ── SCANNING: Barcode scan via Keyence Ethernet ──
             Case MachineStatus.SCANNING
+                ' Keep clamp locked during scan
+                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
+                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
+                outputs(DO_LIGHT_YEL) = True
                 Log("SCAN", "Acquiring Barcode...")
                 Dim barcode = Await ReadBarcodeAsync()
                 If Not String.IsNullOrEmpty(barcode) AndAlso barcode <> "ERROR" AndAlso barcode <> "ER" AndAlso barcode <> "TIMEOUT" Then
@@ -227,7 +240,7 @@ Partial Class Form1
                     scanRetryCount += 1
                     isScannerLive = False
                     If scanRetryCount >= 3 Then
-                        ' After 3 failures, stop and go to MODEL_FAIL
+                        ' After 3 failures — unlock and retract
                         alarmMessage = "Scanner read failed after 3 attempts"
                         Log("SCAN", "✗ " & alarmMessage)
                         scanRetryCount = 0
@@ -240,36 +253,42 @@ Partial Class Form1
 
             ' ── MODEL_CHECK: Flowchart Phase 3 ─ Check barcode vs Master ──
             Case MachineStatus.MODEL_CHECK
+                ' Keep clamp locked
+                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
+                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
                 If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
                     ' Match or wildcard → proceed to dispensing
                     Log("VERIFY", $"✓ Model Match: {lastBarcode}")
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     currentState = MachineStatus.CURTAIN_CHECK
                 Else
-                    ' NG: Red light (Q0.0), popup, wait Start to retract
+                    ' NG: Red light, popup, wait Start to retract
                     alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
                     Log("VERIFY", $"✗ {alarmMessage}")
                     AddScanHistory(lastBarcode, "❌ REJECT")
                     currentState = MachineStatus.MODEL_FAIL
                 End If
 
-            ' ── MODEL_FAIL: Red ON, popup wrong PWBA ──
+            ' ── MODEL_FAIL: Red ON, UNLOCK clamp, wait acknowledge ──
             Case MachineStatus.MODEL_FAIL
+                ' Unlock: Retract ON (Q1.4+Q1.6), Extend OFF (Q1.5+Q1.7)
+                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_YEL) = False
                 outputs(DO_LIGHT_GRN) = False
                 ' Wait for operator press Start to acknowledge
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged — Retracting")
-                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
-                    outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP4) = False
+                    clampStartTime = DateTime.Now
                     currentState = MachineStatus.MODEL_FAIL_RETRACT
                 End If
 
             ' ── MODEL_FAIL_RETRACT: Wait retract then IDLE ──
             Case MachineStatus.MODEL_FAIL_RETRACT
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
                     outputs(DO_LIGHT_RED) = False
                     outputs(DO_LIGHT_GRN) = True
                     alarmMessage = ""
@@ -281,6 +300,7 @@ Partial Class Form1
 
             ' ── CURTAIN_CHECK: Safety curtain must be active ──
             Case MachineStatus.CURTAIN_CHECK
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 If inputs(DI_CURTAIN) Then
                     Log("SAFETY", "✓ Light Curtain Active")
                     currentState = MachineStatus.DISPENSE_START
@@ -292,6 +312,7 @@ Partial Class Form1
 
             ' ── DISPENSE_START: Send program + robot start ──
             Case MachineStatus.DISPENSE_START
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 outputs(DO_LIGHT_YEL) = True
                 UpdateProgramBits()
                 outputs(DO_PROG_LOAD) = True         ' Q0.7 LOAD
@@ -304,6 +325,7 @@ Partial Class Form1
 
             ' ── DISPENSE_RUNNING: Wait robot complete ──
             Case MachineStatus.DISPENSE_RUNNING
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 ' Safety: check curtain during dispensing
                 If Not inputs(DI_CURTAIN) Then
                     alarmMessage = "Light Curtain Interrupted During Dispensing!"
@@ -327,12 +349,14 @@ Partial Class Form1
 
             ' ── DISPENSE_DONE: Green blink then vision ──
             Case MachineStatus.DISPENSE_DONE
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
                 Await Task.Delay(800)
                 currentState = MachineStatus.VISION_CHECK
 
             ' ── VISION_CHECK: Trigger Cognex inspection ──
             Case MachineStatus.VISION_CHECK
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
                 Log("VISION", "Triggering Cognex Inspection...")
                 Dim result = Await SendTcpHandshakeAsync(config.CognexIP, config.CognexPort, "T" & vbCr)
                 lastVisionResult = result
@@ -344,9 +368,10 @@ Partial Class Form1
                     lastVisionResult = "PASS"
                     config.PassCount += 1 : SaveSettings()
                     UpdateScanHistoryStatus(lastBarcode, "✅ PASS")
-                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
-                    outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP4) = False
+                    ' Unlock: Retract ON, Extend OFF
+                    outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                    outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                    clampStartTime = DateTime.Now
                     currentState = MachineStatus.VISION_OK_RETRACT
                 Else
                     Log("VISION", "✗ Inspection FAILED")
@@ -358,7 +383,9 @@ Partial Class Form1
 
             ' ── VISION_OK_RETRACT: Wait retract → complete ──
             Case MachineStatus.VISION_OK_RETRACT
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
                     outputs(DO_LIGHT_GRN) = True
                     cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
                     Log("CYCLE", $"✓ Cycle Complete ({cycleDuration:F2}s)")
@@ -372,15 +399,18 @@ Partial Class Form1
                 alarmMessage = "Vision Inspection FAILED — NG"
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged NG — Retracting")
-                    ' Unlock: Clamp retract (only Q1.5 + Q1.7 are DO)
-                    outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP4) = False
+                    ' Unlock: Retract ON, Extend OFF
+                    outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                    outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                    clampStartTime = DateTime.Now
                     currentState = MachineStatus.VISION_NG_RETRACT
                 End If
 
             ' ── VISION_NG_RETRACT: Retract then IDLE ──
             Case MachineStatus.VISION_NG_RETRACT
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) Then
+                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
+                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
                     outputs(DO_LIGHT_RED) = False
                     outputs(DO_LIGHT_GRN) = True
                     alarmMessage = ""
