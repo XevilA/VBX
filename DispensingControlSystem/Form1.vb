@@ -32,12 +32,16 @@ Partial Class Form1
         Public Property PassCount As Integer = 0
         Public Property FailCount As Integer = 0
         Public Property CameraUrl As String = "http://192.168.1.20/img/snapshot.jpg"
+        Public Property CameraSourcePath As String = ""  ' FTP or local file path (leave empty = use CameraUrl HTTP)
         Public Property MasterBarcode As String = "VBX-001"
+        Public Property DebugLogEnabled As Boolean = True
         Public Property ProgramNames As String() = Enumerable.Range(1, 15).Select(Function(i) $"PROGRAM {i:D2}").ToArray()
     End Class
 
     Private config As New AppConfig()
     Private ReadOnly configPath As String = IO.Path.Combine(Application.StartupPath, "settings.config.json")
+    Private ReadOnly logDir As String = IO.Path.Combine(Application.StartupPath, "logs")
+    Private logWriter As IO.StreamWriter
     Private cycleStartTime As DateTime
 #End Region
 
@@ -390,30 +394,54 @@ Partial Class Form1
 
 #Region "Hardware Handlers"
     Private Async Function ReadBarcodeAsync() As Task(Of String)
+        DebugLog($"SCAN: Connecting to {config.KeyenceIP}:{config.KeyencePort}")
         Try
             Using client As New TcpClient()
+                client.ReceiveTimeout = 3000
+                client.SendTimeout = 2000
                 Dim connectTask = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
-                If Await Task.WhenAny(connectTask, Task.Delay(2000)) Is connectTask Then
-                    Using stream = client.GetStream()
-                        Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCr)
-                        Await stream.WriteAsync(cmd, 0, cmd.Length)
-                        Dim buffer(1024) As Byte
-                        Dim readTask = stream.ReadAsync(buffer, 0, buffer.Length)
-                        If Await Task.WhenAny(readTask, Task.Delay(2500)) Is readTask Then
-                            Dim bytesRead = Await readTask
-                            Dim response = Encoding.ASCII.GetString(buffer, 0, bytesRead).Trim()
-                            cmd = Encoding.ASCII.GetBytes("LOFF" & vbCr)
-                            Await stream.WriteAsync(cmd, 0, cmd.Length)
-                            Return response
-                        End If
-                    End Using
+                If Await Task.WhenAny(connectTask, Task.Delay(3000)) IsNot connectTask Then
+                    DebugLog("SCAN: Connection timeout")
+                    Return "TIMEOUT"
                 End If
+                Await connectTask
+                DebugLog("SCAN: TCP connected")
+                Using stream = client.GetStream()
+                    Dim cmd = Encoding.ASCII.GetBytes("LON" & vbCr)
+                    Await stream.WriteAsync(cmd, 0, cmd.Length)
+                    DebugLog("SCAN: Sent LON command")
+                    Await Task.Delay(300)
+                    Dim fullResponse As String = ""
+                    Dim buffer(4096) As Byte
+                    Dim attempts = 0
+                    While attempts < 5
+                        If stream.DataAvailable Then
+                            Dim bytesRead = Await stream.ReadAsync(buffer, 0, buffer.Length)
+                            If bytesRead > 0 Then
+                                fullResponse &= Encoding.ASCII.GetString(buffer, 0, bytesRead)
+                                DebugLog($"SCAN: Read {bytesRead} bytes: [{fullResponse.Trim()}]")
+                            End If
+                            If fullResponse.Contains(vbCr) OrElse fullResponse.Contains(vbLf) Then Exit While
+                        Else
+                            Await Task.Delay(200)
+                        End If
+                        attempts += 1
+                    End While
+                    cmd = Encoding.ASCII.GetBytes("LOFF" & vbCr)
+                    Await stream.WriteAsync(cmd, 0, cmd.Length)
+                    DebugLog("SCAN: Sent LOFF command")
+                    Dim result = fullResponse.Trim().Replace(vbCr, "").Replace(vbLf, "")
+                    If result.StartsWith("LON") Then result = result.Substring(3).Trim()
+                    DebugLog($"SCAN: Final barcode = [{result}]")
+                    If String.IsNullOrWhiteSpace(result) Then Return "ERROR"
+                    Return result
+                End Using
             End Using
         Catch ex As Exception
+            DebugLog($"SCAN-ERR: {ex.GetType().Name}: {ex.Message}")
             Log("SCAN", $"Scanner Error: {ex.Message}")
             Return "ERROR"
         End Try
-        Return "TIMEOUT"
     End Function
 
     Private Async Function SendTcpHandshakeAsync(ip As String, port As Integer, cmd As String) As Task(Of String)
@@ -504,24 +532,51 @@ Partial Class Form1
     End Sub
 
     ''' <summary>
-    ''' Camera frame update with shared HttpClient and NO SIGNAL overlay
+    ''' Camera frame update — supports HTTP, FTP, and local file paths
     ''' </summary>
     Private Async Sub UpdateCameraFrameAsync(sender As Object, e As EventArgs)
         If picCameraPreview Is Nothing OrElse isPaused Then Return
         Try
-            Dim data = Await httpClient.GetByteArrayAsync(config.CameraUrl)
-            Using ms As New IO.MemoryStream(data)
-                Dim bmp = New Bitmap(ms)
+            Dim bmp As Bitmap = Nothing
+            Dim source = If(Not String.IsNullOrWhiteSpace(config.CameraSourcePath), config.CameraSourcePath, config.CameraUrl)
+
+            If source.StartsWith("ftp://", StringComparison.OrdinalIgnoreCase) Then
+                ' FTP source
+                bmp = Await Task.Run(Function() FetchImageFromFtp(source))
+                DebugLog($"CAM-FTP: Fetched from {source}")
+            ElseIf source.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) Then
+                bmp = Await Task.Run(Function() FetchImageFromTcp(source))
+                DebugLog($"CAM-TCP: Fetched from {source}")
+            ElseIf source.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
+                ' HTTP source (default)
+                Dim data = Await httpClient.GetByteArrayAsync(source)
+                Using ms As New IO.MemoryStream(data) : bmp = New Bitmap(ms) : End Using
+                DebugLog($"CAM-HTTP: Fetched from {source}")
+            ElseIf IO.File.Exists(source) Then
+                ' Local or network file path
+                bmp = Await Task.Run(Function()
+                    Using fs = New IO.FileStream(source, IO.FileMode.Open, IO.FileAccess.Read, IO.FileShare.ReadWrite)
+                        Return New Bitmap(fs)
+                    End Using
+                End Function)
+                DebugLog($"CAM-FILE: Loaded from {source}")
+            Else
+                DebugLog($"CAM-ERR: Unknown source: {source}")
+                Throw New Exception("Invalid camera source")
+            End If
+
+            If bmp IsNot Nothing Then
                 picCameraPreview.Invoke(Sub()
                     If picCameraPreview.Image IsNot Nothing AndAlso picCameraPreview.Image IsNot cameraNoSignalBmp Then
                         picCameraPreview.Image.Dispose()
                     End If
                     picCameraPreview.Image = bmp
                 End Sub)
-            End Using
+            End If
             isVisionLive = True
             UpdateCameraOverlay(True)
-        Catch
+        Catch ex As Exception
+            DebugLog($"CAM-ERR: {ex.Message}")
             isVisionLive = False
             picCameraPreview.Invoke(Sub()
                 If picCameraPreview.Image Is Nothing OrElse picCameraPreview.Image Is cameraNoSignalBmp Then Return
@@ -559,6 +614,101 @@ Partial Class Form1
         Catch
         End Try
     End Sub
+
+    ''' <summary>
+    ''' Fetch image from FTP URL (ftp://user:pass@host/path/image.jpg)
+    ''' </summary>
+    Private Function FetchImageFromFtp(ftpUrl As String) As Bitmap
+        Dim request = CType(System.Net.WebRequest.Create(ftpUrl), System.Net.FtpWebRequest)
+        request.Method = System.Net.WebRequestMethods.Ftp.DownloadFile
+        request.UseBinary = True
+        request.Timeout = 3000
+        ' Extract credentials from URL if present (ftp://user:pass@host/path)
+        Try
+            Dim uri As New Uri(ftpUrl)
+            If Not String.IsNullOrEmpty(uri.UserInfo) Then
+                Dim parts = uri.UserInfo.Split(":"c)
+                If parts.Length = 2 Then
+                    request.Credentials = New System.Net.NetworkCredential(parts(0), parts(1))
+                End If
+            End If
+        Catch
+        End Try
+        Using response = CType(request.GetResponse(), System.Net.FtpWebResponse)
+            Using stream = response.GetResponseStream()
+                Return New Bitmap(stream)
+            End Using
+        End Using
+    End Function
+
+    ''' <summary>
+    ''' Fetch image via TCP (tcp://ip:port) - connects, sends T\r trigger, reads image stream
+    ''' </summary>
+    Private Function FetchImageFromTcp(tcpUrl As String) As Bitmap
+        Dim uri As New Uri(tcpUrl.Replace("tcp://", "http://"))
+        Dim host = uri.Host
+        Dim port = If(uri.Port > 0, uri.Port, 23)
+        Using client As New TcpClient()
+            client.Connect(host, port)
+            Using stream = client.GetStream()
+                Dim cmd = Encoding.ASCII.GetBytes("T" & vbCr)
+                stream.Write(cmd, 0, cmd.Length)
+                stream.Flush()
+                Threading.Thread.Sleep(500)
+                Using ms As New IO.MemoryStream()
+                    Dim buffer(8192) As Byte
+                    Dim totalRead = 0
+                    While stream.DataAvailable OrElse totalRead = 0
+                        Dim n = stream.Read(buffer, 0, buffer.Length)
+                        If n = 0 Then Exit While
+                        ms.Write(buffer, 0, n)
+                        totalRead += n
+                        If Not stream.DataAvailable Then Threading.Thread.Sleep(100)
+                    End While
+                    If totalRead > 100 Then
+                        ms.Position = 0
+                        Return New Bitmap(ms)
+                    End If
+                End Using
+            End Using
+        End Using
+        Return Nothing
+    End Function
+#End Region
+
+#Region "Debug Logging"
+    ''' <summary>
+    ''' Initialize debug log file — creates logs/ directory and daily log file
+    ''' </summary>
+    Private Sub InitDebugLog()
+        Try
+            If Not IO.Directory.Exists(logDir) Then IO.Directory.CreateDirectory(logDir)
+            Dim logFile = IO.Path.Combine(logDir, $"debug_{DateTime.Now:yyyy-MM-dd}.log")
+            logWriter = New IO.StreamWriter(logFile, True, Encoding.UTF8) With {.AutoFlush = True}
+            logWriter.WriteLine($"")
+            logWriter.WriteLine($"═══════════════════════════════════════════════════")
+            logWriter.WriteLine($"  VBX DEBUG LOG — Started {DateTime.Now:yyyy-MM-dd HH:mm:ss}")
+            logWriter.WriteLine($"═══════════════════════════════════════════════════")
+            logWriter.WriteLine($"  Modbus: {config.ModbusIP}:{config.ModbusPort}")
+            logWriter.WriteLine($"  Cognex: {config.CognexIP}:{config.CognexPort}")
+            logWriter.WriteLine($"  Scanner: {config.KeyenceIP}:{config.KeyencePort}")
+            logWriter.WriteLine($"  Camera URL: {config.CameraUrl}")
+            logWriter.WriteLine($"  Camera Path: {If(String.IsNullOrEmpty(config.CameraSourcePath), "(none — using HTTP)", config.CameraSourcePath)}")
+            logWriter.WriteLine($"═══════════════════════════════════════════════════")
+        Catch
+        End Try
+    End Sub
+
+    ''' <summary>
+    ''' Write a debug entry to the log file (if enabled)
+    ''' </summary>
+    Private Sub DebugLog(msg As String)
+        If Not config.DebugLogEnabled Then Return
+        Try
+            logWriter?.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}")
+        Catch
+        End Try
+    End Sub
 #End Region
 
 #Region "HMI Initialization"
@@ -571,6 +721,7 @@ Partial Class Form1
         Me.WindowState = FormWindowState.Maximized
 
         LoadSettings()
+        InitDebugLog()
         CreateNoSignalBitmap()
         LoadLogo()
         BuildLayout()
@@ -992,19 +1143,22 @@ Partial Class Form1
 
     Private Sub Log(category As String, msg As String)
         If logDisplay.InvokeRequired Then : logDisplay.Invoke(Sub() Log(category, msg)) : Return : End If
-        logDisplay.Items.Insert(0, $"[{DateTime.Now:HH:mm:ss}] {category.PadRight(8)} │ {msg}")
+        Dim entry = $"[{DateTime.Now:HH:mm:ss}] {category.PadRight(8)} │ {msg}"
+        logDisplay.Items.Insert(0, entry)
         If logDisplay.Items.Count > 200 Then logDisplay.Items.RemoveAt(200)
+        DebugLog($"{category.PadRight(8)} | {msg}")
     End Sub
 #End Region
 
 #Region "Config Dialog"
     Private Sub ShowConfigDialog()
         Using f As New Form With {
-            .Text = "⚙ VBX CONFIGURATION", .Size = New Size(460, 580),
+            .Text = "⚙ VBX CONFIGURATION", .Size = New Size(460, 740),
             .BackColor = CLR_BG, .ForeColor = CLR_TEXT,
             .StartPosition = FormStartPosition.CenterParent,
             .FormBorderStyle = FormBorderStyle.FixedDialog,
-            .MaximizeBox = False, .MinimizeBox = False
+            .MaximizeBox = False, .MinimizeBox = False,
+            .AutoScroll = True
         }
             Dim flp As New FlowLayoutPanel With {.Dock = DockStyle.Fill, .Padding = New Padding(24, 20, 24, 10), .FlowDirection = FlowDirection.TopDown}
 
@@ -1014,8 +1168,14 @@ Partial Class Form1
             Dim tM = AddConfigField(flp, "Modbus PLC IP", config.ModbusIP)
             Dim tMP = AddConfigField(flp, "Modbus Port", config.ModbusPort.ToString())
             Dim tC = AddConfigField(flp, "Cognex Vision IP", config.CognexIP)
+            Dim tCP = AddConfigField(flp, "Cognex Port", config.CognexPort.ToString())
             Dim tK = AddConfigField(flp, "Keyence Scanner IP", config.KeyenceIP)
-            Dim tCam = AddConfigField(flp, "Camera Snapshot URL", config.CameraUrl)
+            Dim tKP = AddConfigField(flp, "Keyence Port", config.KeyencePort.ToString())
+
+            flp.Controls.Add(New Label With {.Text = "CAMERA SOURCE", .ForeColor = CLR_ACCENT, .Font = New Font("Segoe UI", 10, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(0, 12, 0, 6)})
+            Dim tCam = AddConfigField(flp, "Camera HTTP URL", config.CameraUrl)
+            Dim tCamPath = AddConfigField(flp, "Camera FTP/TCP/File Path (empty = use HTTP)", config.CameraSourcePath)
+            flp.Controls.Add(New Label With {.Text = "ftp://ip/path | tcp://ip:port | C:\path\img.jpg", .ForeColor = CLR_DIM, .Font = New Font("Segoe UI", 8), .AutoSize = True, .Margin = New Padding(0, 0, 0, 4)})
 
             flp.Controls.Add(New Label With {.Text = "PRODUCTION", .ForeColor = CLR_ACCENT, .Font = New Font("Segoe UI", 10, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(0, 16, 0, 10)})
             Dim tB = AddConfigField(flp, "Master Barcode (* = any)", config.MasterBarcode)
@@ -1033,6 +1193,28 @@ Partial Class Form1
             End Sub
             flp.Controls.Add(btnResetCounters)
 
+            ' Reset to factory defaults button
+            Dim btnDefaults As New Button With {
+                .Text = "RESET TO DEFAULTS", .Height = 36, .Width = 380, .BackColor = CLR_DANGER,
+                .ForeColor = Color.White, .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 10),
+                .Margin = New Padding(0, 6, 0, 0)
+            }
+            btnDefaults.FlatAppearance.BorderSize = 0
+            AddHandler btnDefaults.Click, Sub()
+                If MessageBox.Show("Reset all settings to factory defaults?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) = DialogResult.Yes Then
+                    tM.Text = DEFAULT_MODBUS_IP
+                    tMP.Text = DEFAULT_MODBUS_PORT.ToString()
+                    tC.Text = DEFAULT_COGNEX_IP
+                    tCP.Text = DEFAULT_COGNEX_PORT.ToString()
+                    tK.Text = DEFAULT_KEYENCE_IP
+                    tKP.Text = DEFAULT_KEYENCE_PORT.ToString()
+                    tCam.Text = "http://192.168.1.20/img/snapshot.jpg"
+                    tCamPath.Text = ""
+                    tB.Text = "VBX-001"
+                End If
+            End Sub
+            flp.Controls.Add(btnDefaults)
+
             f.Controls.Add(flp)
 
             Dim btnSave As New Button With {
@@ -1044,8 +1226,12 @@ Partial Class Form1
             AddHandler btnSave.Click, Sub()
                 config.ModbusIP = tM.Text
                 Integer.TryParse(tMP.Text, config.ModbusPort)
-                config.CognexIP = tC.Text : config.KeyenceIP = tK.Text
-                config.CameraUrl = tCam.Text : config.MasterBarcode = tB.Text
+                config.CognexIP = tC.Text
+                Integer.TryParse(tCP.Text, config.CognexPort)
+                config.KeyenceIP = tK.Text
+                Integer.TryParse(tKP.Text, config.KeyencePort)
+                config.CameraUrl = tCam.Text : config.CameraSourcePath = tCamPath.Text
+                config.MasterBarcode = tB.Text
                 ' Force Modbus reconnect
                 Try : modbusClient?.Disconnect() : Catch : End Try
                 modbusClient = Nothing : modbusReconnectCooldown = 0
