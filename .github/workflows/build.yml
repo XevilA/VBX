@@ -1,0 +1,50 @@
+name: 🔧 VBX Standalone Build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build Windows x64 Standalone EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🛠 Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 📦 Restore Dependencies
+        run: dotnet restore DispensingControlSystem/DispensingControlSystem.vbproj
+
+      - name: 🔨 Publish Standalone EXE
+        run: |
+          dotnet publish DispensingControlSystem/DispensingControlSystem.vbproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:PublishReadyToRun=true `
+            -p:PublishTrimmed=false `
+            -o ./Output/Standalone/win-x64
+
+      - name: 📋 List Output Files
+        run: |
+          Write-Host "=== Build Output ==="
+          Get-ChildItem -Path ./Output/Standalone/win-x64 -Recurse | Format-Table Name, Length -AutoSize
+
+      - name: 📤 Upload Artifact — VBX Standalone EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: VBX-DispensingControl-win-x64
+          path: Output/Standalone/win-x64/
+          retention-days: 30
+          if-no-files-found: error
