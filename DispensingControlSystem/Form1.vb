@@ -388,7 +388,7 @@ Partial Class Form1
                 outputs(DO_PROG_LOAD) = False
                 outputs(DO_ROBOT_START) = False
                 outputs(DO_ROBOT_PAUSE) = False
-                outputs(DO_ROBOT_EMGCY) = False
+                outputs(DO_ROBOT_ESTOP) = False
                 Log("DATA", "Sending data to server...")
                 ' TODO: server data upload here
                 Await Task.Delay(500)
