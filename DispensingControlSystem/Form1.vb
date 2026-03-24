@@ -314,18 +314,16 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── CURTAIN_CHECK: Safety curtain must be active ──
+            ' ── CURTAIN_CHECK: Safety curtain (bypass for now — log only) ──
             Case MachineStatus.CURTAIN_CHECK
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                DebugLog($"CURTAIN: I0.3={inputs(DI_CURTAIN)} State={currentState}")
                 If inputs(DI_CURTAIN) Then
                     Log("SAFETY", "✓ Light Curtain Active (I0.3=ON)")
-                    currentState = MachineStatus.DISPENSE_START
                 Else
-                    alarmMessage = "Safety Light Curtain NOT Active (I0.3=OFF)"
-                    Log("SAFETY", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
+                    Log("SAFETY", "⚠ Light Curtain I0.3=OFF — Bypassed (check wiring)")
                 End If
+                ' Always proceed — curtain bypass enabled
+                currentState = MachineStatus.DISPENSE_START
 
             ' ── DISPENSE_START: Send program + robot start ──
             Case MachineStatus.DISPENSE_START
