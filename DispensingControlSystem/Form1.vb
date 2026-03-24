@@ -194,11 +194,11 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = True        ' Green = Ready
                 If triggerStart Then
                     cycleStartTime = DateTime.Now
-                    ' Activate cylinder clamp
-                    outputs(DO_CLAMP) = True
-                    outputs(DO_CLAMP2) = True
-                    outputs(DO_CLAMP3) = True
-                    outputs(DO_CLAMP4) = True
+                    ' Lock: Push clamp IN (double-acting cylinder)
+                    outputs(DO_CLAMP) = False      ' 1 OFF (retract side)
+                    outputs(DO_CLAMP2) = True       ' 2 ON  (extend side)
+                    outputs(DO_CLAMP3) = False      ' 3 OFF (retract side)
+                    outputs(DO_CLAMP4) = True       ' 4 ON  (extend side)
                     Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
@@ -250,10 +250,11 @@ Partial Class Form1
                 ' Wait for operator press Start to acknowledge
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged — Retracting")
-                    outputs(DO_CLAMP) = False
+                    ' Unlock: Push clamp OUT (1 & 3)
                     outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP3) = False
                     outputs(DO_CLAMP4) = False
+                    outputs(DO_CLAMP) = True
+                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.MODEL_FAIL_RETRACT
                 End If
 
@@ -333,11 +334,11 @@ Partial Class Form1
                     lastVisionResult = "PASS"
                     config.PassCount += 1 : SaveSettings()
                     UpdateScanHistoryStatus(lastBarcode, "✅ PASS")
-                    ' Auto unclamp + retract
-                    outputs(DO_CLAMP) = False
+                    ' Unlock: Push clamp OUT (1 & 3)
                     outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP3) = False
                     outputs(DO_CLAMP4) = False
+                    outputs(DO_CLAMP) = True
+                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.VISION_OK_RETRACT
                 Else
                     Log("VISION", "✗ Inspection FAILED")
@@ -363,10 +364,11 @@ Partial Class Form1
                 alarmMessage = "Vision Inspection FAILED — NG"
                 If triggerStart Then
                     Log("SYSTEM", "Operator acknowledged NG — Retracting")
-                    outputs(DO_CLAMP) = False
+                    ' Unlock: Push clamp OUT (1 & 3)
                     outputs(DO_CLAMP2) = False
-                    outputs(DO_CLAMP3) = False
                     outputs(DO_CLAMP4) = False
+                    outputs(DO_CLAMP) = True
+                    outputs(DO_CLAMP3) = True
                     currentState = MachineStatus.VISION_NG_RETRACT
                 End If
 
