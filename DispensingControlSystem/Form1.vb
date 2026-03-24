@@ -926,11 +926,19 @@ Partial Class Form1
     End Function
 
     Private Sub SaveSettings()
-        Try : IO.File.WriteAllText(configPath, System.Text.Json.JsonSerializer.Serialize(config)) : Catch : End Try
+        Try
+            IO.File.WriteAllText(configPath, System.Text.Json.JsonSerializer.Serialize(config))
+        Catch ex As Exception
+        End Try
     End Sub
 
     Private Sub LoadSettings()
-        Try : If IO.File.Exists(configPath) Then config = System.Text.Json.JsonSerializer.Deserialize(Of AppConfig)(IO.File.ReadAllText(configPath)) : Catch : End Try
+        Try
+            If IO.File.Exists(configPath) Then
+                config = System.Text.Json.JsonSerializer.Deserialize(Of AppConfig)(IO.File.ReadAllText(configPath))
+            End If
+        Catch ex As Exception
+        End Try
     End Sub
 #End Region
 
