@@ -1,11 +1,12 @@
-name: 🔧 VBX Standalone Build
+name: 🔧 VBX Standalone Build & Release
 
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]       # Push tag v1.0.0 → auto create Release
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:  # Manual trigger from GitHub UI
+  workflow_dispatch:      # Manual trigger from GitHub UI
 
 jobs:
   build:
@@ -41,10 +42,38 @@ jobs:
           Write-Host "=== Build Output ==="
           Get-ChildItem -Path ./Output/Standalone/win-x64 -Recurse | Format-Table Name, Length -AutoSize
 
-      - name: 📤 Upload Artifact — VBX Standalone EXE
+      - name: 📤 Upload Artifact (for PR/branch builds)
         uses: actions/upload-artifact@v4
         with:
           name: VBX-DispensingControl-win-x64
           path: Output/Standalone/win-x64/
           retention-days: 30
           if-no-files-found: error
+
+      # === PUBLIC RELEASE (when pushing a tag like v1.0.0) ===
+      - name: 📦 Zip Release Package
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          Compress-Archive -Path ./Output/Standalone/win-x64/* -DestinationPath ./VBX-DispensingControl-${{ github.ref_name }}-win-x64.zip
+
+      - name: 🚀 Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "VBX Dispensing Control ${{ github.ref_name }}"
+          body: |
+            ## VBX Dispensing Control System — ${{ github.ref_name }}
+
+            ### 📥 Download
+            ดาวน์โหลดไฟล์ `.zip` ด้านล่าง → แตกไฟล์ → รัน `DispensingControlSystem.exe`
+
+            ### ℹ️ Requirements
+            - Windows 10/11 x64
+            - ไม่ต้องติดตั้ง .NET (Self-Contained)
+
+            ### ⚠️ หมายเหตุ
+            - ถ้า Windows SmartScreen ขึ้นเตือน → คลิก **More info** → **Run anyway**
+          files: ./VBX-DispensingControl-${{ github.ref_name }}-win-x64.zip
+          draft: false
+          prerelease: false
+
