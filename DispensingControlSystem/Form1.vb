@@ -15,6 +15,7 @@ Partial Class Form1
     Inherits Form
 
 #Region "Hardware Configuration"
+    ' === Defaults per actual hardware (user images) ===
     Private Const DEFAULT_MODBUS_IP As String = "192.168.1.12"
     Private Const DEFAULT_MODBUS_PORT As Integer = 502
     Private Const DEFAULT_COGNEX_IP As String = "192.168.1.20"
@@ -45,20 +46,20 @@ Partial Class Form1
     Private cycleStartTime As DateTime
 #End Region
 
-#Region "I/O Mapping (per Hardware I/O Table)"
+#Region "I/O Mapping (per Hardware I/O Table — user images)"
     ' ── INPUTS (Discrete Inputs from Modbus) ──
     Private Const DI_ESTOP As Integer = 0        ' I0.0  Emergency Stop (NC)
     Private Const DI_START As Integer = 1         ' I0.1  Start Button
     Private Const DI_START2 As Integer = 2        ' I0.2  Start Button (2)
     Private Const DI_CURTAIN As Integer = 3       ' I0.3  Safety Light Curtain KEYENCE (NC)
-    Private Const DI_ROBOT_RUN As Integer = 4     ' I0.4  Robot JR3403F Running
-    Private Const DI_ROBOT_DONE As Integer = 5    ' I0.5  Robot JR3403F Complete
-    Private Const DI_ROBOT_FAULT As Integer = 6   ' I0.6  Robot JR3403F Fault
-    Private Const DI_VISION_OK As Integer = 7     ' I0.7  Cognex In-Sight 2800 OK
-    Private Const DI_VISION_NG As Integer = 8     ' I1.0  Cognex In-Sight 2800 NG
-    Private Const DI_CYL_EXT As Integer = 9       ' I1.1  Cylinder Extend Sensor
+    Private Const DI_ROBOT_RUN As Integer = 4     ' I0.4  Robot Running
+    Private Const DI_ROBOT_DONE As Integer = 5    ' I0.5  Robot Complete
+    Private Const DI_ROBOT_FAULT As Integer = 6   ' I0.6  Robot Fault
+    Private Const DI_VISION_OK As Integer = 7     ' I0.7  Vision OK (Cognex)
+    Private Const DI_VISION_NG As Integer = 8     ' I1.0  Vision NG (Cognex)
+    Private Const DI_CYL_EXT As Integer = 9       ' I1.1  Cylinder Extend Sensor 1
     Private Const DI_CYL_EXT2 As Integer = 10     ' I1.2  Cylinder Extend Sensor 2
-    Private Const DI_CYL_RET As Integer = 11      ' I1.3  Cylinder Retract Sensor
+    Private Const DI_CYL_RET As Integer = 11      ' I1.3  Cylinder Retract Sensor 1
     Private Const DI_CYL_RET2 As Integer = 12     ' I1.4  Cylinder Retract Sensor 2
 
     ' ── OUTPUTS (Coils to Modbus) ──
@@ -67,14 +68,14 @@ Partial Class Form1
     Private Const DO_LIGHT_GRN As Integer = 2     ' Q0.2  Tower Light Green
     ' Q0.3 reserved
     Private Const DO_ROBOT_ESTOP As Integer = 4   ' Q0.4  Robot Emergency Signal
-    Private Const DO_ROBOT_START As Integer = 5   ' Q0.5  Robot Start Signal
+    Private Const DO_ROBOT_START As Integer = 5   ' Q0.5  Robot Start Signal (500ms pulse)
     Private Const DO_ROBOT_PAUSE As Integer = 6   ' Q0.6  Robot Pause Signal
     Private Const DO_PROG_LOAD As Integer = 7     ' Q0.7  Program Number LOAD
     Private Const DO_PROG_BIT0 As Integer = 8     ' Q1.0  Program bit0 (2^0=1)
     Private Const DO_PROG_BIT1 As Integer = 9     ' Q1.1  Program bit1 (2^1=2)
     Private Const DO_PROG_BIT2 As Integer = 10    ' Q1.2  Program bit2 (2^2=4)
     Private Const DO_PROG_BIT3 As Integer = 11    ' Q1.3  Program bit3 (2^3=8)
-    Private Const DO_CLAMP As Integer = 12        ' Q1.4  Cylinder Clamp
+    Private Const DO_CLAMP As Integer = 12        ' Q1.4  Cylinder Clamp 1
     Private Const DO_CLAMP2 As Integer = 13       ' Q1.5  Cylinder Clamp 2
     Private Const DO_CLAMP3 As Integer = 14       ' Q1.6  Cylinder Clamp 3
     Private Const DO_CLAMP4 As Integer = 15       ' Q1.7  Cylinder Clamp 4
@@ -156,6 +157,7 @@ Partial Class Form1
 #Region "Core Machine Logic — ViscoTec Flowchart"
     Private Async Function RunWorkflowAsync() As Task
         Dim triggerStart = isSoftwareStartRequested OrElse inputs(DI_START) OrElse inputs(DI_START2)
+
         Dim triggerReset = isSoftwareResetRequested
         isSoftwareStartRequested = False
         isSoftwareResetRequested = False
@@ -178,7 +180,7 @@ Partial Class Form1
 
         If currentState = MachineStatus.EMERGENCY_STOP Then
             outputs(DO_LIGHT_RED) = True
-            outputs(DO_ROBOT_ESTOP) = True   ' Q0.4 Robot emergency
+            outputs(DO_ROBOT_ESTOP) = True   ' DO-03 Robot emergency
             outputs(DO_LIGHT_GRN) = False
             outputs(DO_LIGHT_YEL) = False
             Return
@@ -674,6 +676,86 @@ Partial Class Form1
         End Using
         Return Nothing
     End Function
+
+    ''' <summary>
+    ''' Auto-detect and probe all devices on startup
+    ''' </summary>
+    Private Async Function AutoDetectDevicesAsync() As Task
+        DebugLog("AUTO-DETECT: Starting device scan...")
+        Log("DETECT", $"Scanning Modbus at {config.ModbusIP}:{config.ModbusPort}")
+
+        ' === 1. Probe Modbus TCP ===
+        Try
+            Await Task.Run(Sub()
+                modbusClient = New ModbusClient(config.ModbusIP, config.ModbusPort)
+                modbusClient.ConnectionTimeout = 3000
+                modbusClient.Connect()
+            End Sub)
+            If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then
+                isModbusLive = True
+                Log("DETECT", $"✓ Modbus ONLINE at {config.ModbusIP}:{config.ModbusPort}")
+                DebugLog("AUTO-DETECT: Modbus connected OK")
+            End If
+        Catch ex As Exception
+            isModbusLive = False
+            modbusClient = Nothing
+            Log("DETECT", $"✗ Modbus OFFLINE ({ex.Message})")
+            DebugLog($"AUTO-DETECT: Modbus failed: {ex.Message}")
+        End Try
+
+        ' === 2. Probe Cognex Vision TCP (send T\r) ===
+        Log("DETECT", $"Scanning Cognex at {config.CognexIP}:{config.CognexPort}")
+        Try
+            Dim result = Await SendTcpHandshakeAsync(config.CognexIP, config.CognexPort, "T" & vbCr)
+            If result <> "TIMEOUT" AndAlso result <> "NET_ERR" Then
+                isVisionLive = True
+                Log("DETECT", $"✓ Cognex ONLINE (response: {result})")
+            Else
+                isVisionLive = False
+                Log("DETECT", $"✗ Cognex OFFLINE ({result})")
+            End If
+        Catch ex As Exception
+            isVisionLive = False
+            Log("DETECT", $"✗ Cognex OFFLINE ({ex.Message})")
+        End Try
+
+        ' === 3. Probe Keyence Scanner TCP ===
+        Log("DETECT", $"Scanning Keyence at {config.KeyenceIP}:{config.KeyencePort}")
+        Try
+            Using client As New TcpClient()
+                Dim ct = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
+                If Await Task.WhenAny(ct, Task.Delay(2000)) Is ct Then
+                    Await ct
+                    isScannerLive = True
+                    Log("DETECT", $"✓ Keyence ONLINE at {config.KeyenceIP}:{config.KeyencePort}")
+                    DebugLog("AUTO-DETECT: Keyence TCP connected OK")
+                Else
+                    isScannerLive = False
+                    Log("DETECT", "✗ Keyence OFFLINE (timeout)")
+                End If
+            End Using
+        Catch ex As Exception
+            isScannerLive = False
+            Log("DETECT", $"✗ Keyence OFFLINE ({ex.Message})")
+        End Try
+
+        ' === 4. Probe Camera HTTP ===
+        Log("DETECT", $"Scanning Camera at {config.CameraUrl}")
+        Try
+            Dim resp = Await httpClient.GetAsync(config.CameraUrl, System.Net.Http.HttpCompletionOption.ResponseHeadersRead)
+            If resp.IsSuccessStatusCode Then
+                Log("DETECT", "✓ Camera HTTP ONLINE")
+            Else
+                Log("DETECT", $"✗ Camera HTTP error ({resp.StatusCode})")
+            End If
+        Catch ex As Exception
+            Log("DETECT", $"✗ Camera HTTP OFFLINE ({ex.Message})")
+        End Try
+
+        DebugLog("AUTO-DETECT: Scan complete")
+        Log("DETECT", "Device scan complete")
+        UpdateHMI()
+    End Function
 #End Region
 
 #Region "Debug Logging"
@@ -725,6 +807,12 @@ Partial Class Form1
         CreateNoSignalBitmap()
         LoadLogo()
         BuildLayout()
+
+        ' Auto-detect devices on startup
+        AddHandler Me.Shown, Async Sub()
+            Log("SYSTEM", "Auto-detecting devices...")
+            Await AutoDetectDevicesAsync()
+        End Sub
 
         mainTimer = New Timer With {.Interval = 100}
         AddHandler mainTimer.Tick, AddressOf SyncModbusAsync

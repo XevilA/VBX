@@ -6,68 +6,141 @@
 
 ## 1. การตั้งค่า Network (IP Address Configuration)
 
-อุปกรณ์แต่ละชิ้นจะสื่อสารผ่านวงทราฟฟิก LAN โดยใช้ IP เริ่มต้นดังต่อไปนี้ (สามารถเปลี่ยนแปลงได้ผ่านเมนู `CONFIG [F5]` ภายในโปรแกรม หรือแก้ไขในไฟล์ `settings.json`)
+อุปกรณ์แต่ละชิ้นจะสื่อสารผ่าน LAN โดยใช้ IP เริ่มต้นดังต่อไปนี้ (เปลี่ยนแปลงได้ผ่าน `CONFIG [F5]` หรือ `settings.config.json`)
 
-| อุปกรณ์ (Device) | หน้าที่ | IP Address (ค่าเริ่มต้น) | Port | โปรโตคอล |
+| อุปกรณ์ (Device) | หน้าที่ | IP Address | Port | โปรโตคอล |
 | :--- | :--- | :--- | :--- | :--- |
-| **AMSAMOTION MT3A-IO1632** | I/O Controller หลัก | `192.168.1.50` | `502` | Modbus TCP |
-| **Cognex In-Sight 2800** | Vision System (กล้อง) | `192.168.1.20` | `23` | TCP / Telnet |
-| **Keyence Barcode** | สแกนเนอร์บาร์โค้ด | `192.168.1.10` | `23` | TCP / Telnet |
+| **ETH-MODBUS-IO16R** | I/O Controller (16DI/16DO) | `192.168.1.12` | `502` | Modbus TCP |
+| **Cognex In-Sight 2800** | Vision System (กล้อง) | `192.168.1.20` | `80` | TCP / HTTP |
+| **Keyence Barcode Scanner** | สแกนเนอร์บาร์โค้ด | `192.168.1.54` | `23` | TCP / Telnet |
 
-> **หมายเหตุสำหรับกล้อง:** การแสดงผลภาพสดในโปรแกรมจะทำการดึงภาพผ่าย HTTP จาก URL: `http://192.168.1.20/img/snapshot.jpg` (ตาม IP ที่ตั้งไว้)
+> **หมายเหตุสำหรับกล้อง:** การแสดงผลภาพสดดึงผ่าน HTTP จาก URL: `http://192.168.1.20/img/snapshot.jpg`
+> รองรับ FTP (`ftp://ip/path`), TCP (`tcp://ip:port`), และ File Path (`C:\path\image.jpg`)
 
----
+### อุปกรณ์ไฟฟ้า
 
-## 2. การเชื่อมต่อสัญญาณ Input (จากอุปกรณ์เข้าสู่บอร์ด Modbus)
-
-สายสัญญาณ Input ของบอร์ดเชื่อมต่อเพื่อรับสถานะของเซนเซอร์และฮาร์ดแวร์ดังนี้ (อ้างอิงสถานะ `inputs(0)` ถึง `inputs(15)`)
-
-| ตำแหน่ง (DI) | หน้าที่ / ความหมาย | ทำงานระหว่างสถานะ (Mode) |
+| No. | รุ่น | Fuse |
 | :---: | :--- | :--- |
-| **DI 00** | **Safety / E-Stop (NC)** ตรวจจับการขัดจังหวะฉุกเฉิน (ต้องมีสัญญาณ 24V) | ทุกสถานะ (Global) |
-| **DI 01** | **ปุ่ม Start / รับสัญญาณ Start Cycle** | `READY_WAIT` |
-| **DI 02** | **Safety Light Curtain (ม่านแสงนิรภัย)** (NC) | `B1_DISPENSE_POST` |
-| **DI 03** | **Cylinder Retract (เซนเซอร์กระบอกสูบหดกลับสุด)** | `A1_WAIT_RETRACT`, `FINISH_SUCCESS` |
-| **DI 04** | **Robot Complete (JR3403F - สัญญาณพ่นเสร็จ)** | `B1_DISPENSE_WAIT` |
-| **DI 05** | **Robot Fail / Fault (สัญญาณแจ้งเตือนจากหุ่นยนต์)** | `B1_DISPENSE_WAIT` |
-| **DI 06** | **Vision OK (สัญญาณ PASS จากกล้อง In-Sight 2800)** | `VISION_CHECK` |
-| **DI 07** | **Vision NG (สัญญาณ FAIL จากกล้อง In-Sight 2800)** | `VISION_CHECK` |
-
-*สถานะของเซนเซอร์ Safety และ Interlock (DI 00, 02, 06) เป็นแบบ ปกติปิด (Normally Closed - NC) เพื่อความปลอดภัยสูงสุด หากสัญญาณหายไปจะทริก E-STOP อัตโนมัติ*
+| 1 | IC60N/C25A - 2P | 1-F15 |
+| 2 | IC60N/C6A - 1P | 7-F12 |
+| 3 | ETH-MODBUS-IO16R | 1-B22 |
 
 ---
 
-## 3. การเชื่อมต่อสัญญาณ Output (จากบอร์ด Modbus สั่งงานอุปกรณ์)
+## 2. PC I/O — Safety Enclosure (อุปกรณ์ No.1)
 
-สายสัญญาณ Output ของบอร์ดเพื่อควบคุมวาล์ว, หุ่นยนต์ และไฟทาวเวอร์ริ่ง (อ้างอิง `outputs(0)` ถึง `outputs(15)`)
-
-| ตำแหน่ง (DO) | หน้าที่ / ความหมาย | หมายเหตุ |
-| :---: | :--- | :--- |
-| **DO 00** | **Tower Light - Red (ไฟแดง / แจ้งเตือนหรืออันตราย)** | `ALARM` หรือ `E-Stop Active` |
-| **DO 01** | **Tower Light - Yellow (ไฟเหลือง / แจ้งขณะหุ่นยนต์กำลังทำงาน)** | `B1_DISPENSE_START` |
-| **DO 02** | **Tower Light - Green (ไฟเขียว / เครื่องอยู่ในสถานะพร้อมทำงาน)** | `A1_REMOVE_PART`, `FINISH_SUCCESS` |
-| **DO 03** | **Robot Emergency Signal (ตัดไฟฉุกเฉินหุ่นยนต์)** | ปิดเมื่อปกติ, เปิดเมื่อเกิด E-Stop |
-| **DO 04** | **Robot Start (สั่งหุ่นยนต์เริ่มทำงาน)** | สัญญาณ Pulse (500ms) |
-| **DO 05** | **Robot Pause (สั่งหุ่นยนต์หยุดชั่วคราว)** | ส่งสัญญาณเมื่องานถูกหยุด |
-| **DO 06** | **Program Select - Bit 0 (LSB)** | บิตแรกของการเลือกโปรแกรม |
-| **DO 07** | **Program Select - Bit 1** | บิตที่สองของการเลือกโปรแกรม |
-| **DO 08** | **Program Select - Bit 2** | บิตที่สามของการเลือกโปรแกรม |
-| **DO 09** | **Program Select - Bit 3 (MSB)** | บิตสูงสุดของการเลือกโปรแกรม (รวม 15 โปรแกรม) |
-| **DO 10** | **Cylinder Clamp / Unclamp Control** | สั่งโซลินอยด์วาล์วแคลมป์ชิ้นงาน |
-
-### ตารางแปลงการส่งเลข Program (DO 07 ถึง DO 10)
-หน้าจอ HMI ควบคุมหุ่นยนต์ได้สูงสุด 15 โปรแกรม โดยแปลงผ่านเลขฐานสอง (Binary):
-- **Program 1:** DO 07=ON (เลข 1)
-- **Program 2:** DO 08=ON (เลข 2)
-- **Program 3:** DO 07=ON, DO 08=ON (เลข 3)
-- **Program 15:** ON ทั้ง DO 07, 08, 09, 10 (เลข 15)
+| สัญญาณ | Input | Output | คำอธิบาย |
+| :--- | :---: | :---: | :--- |
+| Tower Light (3-color R/Y/G) | — | Q0.0-Q0.2 | ไฟสัญญาณ Red/Yellow/Green |
+| Emergency Stop Button | I0.0 | — | สวิตช์หยุดฉุกเฉิน (NC) |
+| Start Button | I0.1-I0.2 | — | ปุ่มกดเริ่มทำงาน |
+| Safety Light Curtain (KEYENCE) | I0.3 | — | ม่านแสงนิรภัย (NC) |
 
 ---
 
-## 4. รูปแบบคำสั่งการวิชันและสแกนเนอร์ (TCP Handshake)
+## 3. PC I/O — Robot JR3403F (อุปกรณ์ No.2)
 
-* **Keyence Barcode Scanner:** เมื่อเครื่องถึงสถานะ `SCAN` โปรแกรมจะส่งข้อความ `LON\r` ผ่าน TCP ไปยังสแกนเนอร์เพื่อเปิดแสงสแกนเนอร์
-* **Cognex Vision 2800:** เมื่อเครื่องถึงสถานะ `VISION` โปรแกรมจะส่งข้อความ `T\r` ไปยังกล้องทาง TCP และกล้องต้องตอบกลับเป็นคำที่มี `OK` (เพื่อให้ผ่าน) หากไม่สามารถอ่านจาก TCP ได้ จะใช้สัญญาณ I/O Fallback จากสาย DI 07 เป็นตัวตัดสิน
+| สัญญาณ | Input | Output | Cable Core | คำอธิบาย |
+| :--- | :---: | :---: | :---: | :--- |
+| Emergency Signal | — | Q0.4 | 3 | สัญญาณฉุกเฉินหุ่นยนต์ |
+| Start Signal | — | Q0.5 | 4 | สั่งเริ่มทำงาน (500ms pulse) |
+| Pause Signal | — | Q0.6 | 5 | สั่งหยุดชั่วคราว |
+| Program Select | — | Q0.7, Q1.0-Q1.3 | 6,7,8,9,13 | เลือกโปรแกรม (binary) |
+| Running Signal | I0.4 | — | 10 | หุ่นยนต์กำลังทำงาน |
+| Complete Signal | I0.5 | — | 11 | หุ่นยนต์ทำงานเสร็จ |
+| Fault Signal | I0.6 | — | 12 | หุ่นยนต์แจ้งเตือน |
+
+### Program Select Encoding (Q0.7 = LOAD, Q1.0-Q1.3 = Binary)
+
+| Output | Coil Index | ความหมาย |
+| :---: | :---: | :--- |
+| Q0.7 | outputs(7) | Program Number LOAD |
+| Q1.0 | outputs(8) | bit0 (2⁰ = 1) |
+| Q1.1 | outputs(9) | bit1 (2¹ = 2) |
+| Q1.2 | outputs(10) | bit2 (2² = 4) |
+| Q1.3 | outputs(11) | bit3 (2³ = 8) |
+
+**ตัวอย่าง:** Program 5 = Q0.7=ON, Q1.0=ON, Q1.2=ON (1+4=5)
+**สูงสุด 15 โปรแกรม** (Q1.0-Q1.3 ทั้งหมด ON = 15)
 
 ---
-*ผลิตโดย: VBX HMI System Configuration*
+
+## 4. PC I/O — Cognex In-Sight 2800 (อุปกรณ์ No.4)
+
+| สัญญาณ | Input | Output | คำอธิบาย |
+| :--- | :---: | :---: | :--- |
+| OK | I0.7 | — | สัญญาณ PASS จากกล้อง |
+| NG | I1.0 | — | สัญญาณ FAIL จากกล้อง |
+| Ethernet | TCP | — | ส่ง `T\r` เพื่อ trigger, ตอบ OK/NG |
+
+---
+
+## 5. PC I/O — KEYENCE Barcode Scanner (อุปกรณ์ No.5)
+
+| สัญญาณ | Port | คำอธิบาย |
+| :--- | :---: | :--- |
+| Ethernet TCP | 23 | ส่ง `LON\r` เพื่อเปิดสแกน, รับ barcode, `LOFF\r` เพื่อปิด |
+
+---
+
+## 6. Clamp Rock (Cylinder) — Reed Switch (อุปกรณ์ No.6)
+
+| สัญญาณ | Input | Output | คำอธิบาย |
+| :--- | :---: | :---: | :--- |
+| Cylinder Sensors | I1.1-I1.4 | — | Reed switch ตรวจจับตำแหน่ง |
+| Cylinder Clamp Control | — | Q1.4-Q1.7 | โซลินอยด์วาล์วแคลมป์ |
+
+---
+
+## 7. สรุป I/O Mapping (0-indexed Modbus)
+
+### Inputs (`inputs(0)` - `inputs(12)`)
+
+| Index | Modbus | หน้าที่ | NC/NO |
+| :---: | :---: | :--- | :---: |
+| 0 | I0.0 | **Emergency Stop** | NC |
+| 1 | I0.1 | **Start Button** | NO |
+| 2 | I0.2 | **Start Button (2)** | NO |
+| 3 | I0.3 | **Safety Light Curtain** | NC |
+| 4 | I0.4 | **Robot Running** | NO |
+| 5 | I0.5 | **Robot Complete** | NO |
+| 6 | I0.6 | **Robot Fault** | NO |
+| 7 | I0.7 | **Vision OK** (Cognex) | NO |
+| 8 | I1.0 | **Vision NG** (Cognex) | NO |
+| 9 | I1.1 | **Cylinder Sensor 1** (extend) | NO |
+| 10 | I1.2 | **Cylinder Sensor 2** (extend) | NO |
+| 11 | I1.3 | **Cylinder Sensor 3** (retract) | NO |
+| 12 | I1.4 | **Cylinder Sensor 4** (retract) | NO |
+
+### Outputs (`outputs(0)` - `outputs(15)`)
+
+| Index | Modbus | หน้าที่ |
+| :---: | :---: | :--- |
+| 0 | Q0.0 | **Tower Light RED** |
+| 1 | Q0.1 | **Tower Light YELLOW** |
+| 2 | Q0.2 | **Tower Light GREEN** |
+| 3 | Q0.3 | *(reserved)* |
+| 4 | Q0.4 | **Robot Emergency** |
+| 5 | Q0.5 | **Robot Start** (500ms pulse) |
+| 6 | Q0.6 | **Robot Pause** |
+| 7 | Q0.7 | **Program LOAD** |
+| 8 | Q1.0 | **Program bit0** (2⁰=1) |
+| 9 | Q1.1 | **Program bit1** (2¹=2) |
+| 10 | Q1.2 | **Program bit2** (2²=4) |
+| 11 | Q1.3 | **Program bit3** (2³=8) |
+| 12 | Q1.4 | **Cylinder Clamp 1** |
+| 13 | Q1.5 | **Cylinder Clamp 2** |
+| 14 | Q1.6 | **Cylinder Clamp 3** |
+| 15 | Q1.7 | **Cylinder Clamp 4** |
+
+---
+
+## 8. Modbus Board Spec
+
+| รายการ | ค่า |
+| :--- | :--- |
+| Digital I/O | 8 (Note: Recommend 16I/16O) |
+| Ethernet Port | 2 |
+
+---
+*ผลิตโดย: VBX HMI System — ViscoTec / A Plus Industry*
