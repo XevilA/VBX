@@ -375,22 +375,30 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ STANDBY mode: ถ้ามีคนเอามือไปบังม่านแสง (I0.3 = ON) -> pause แล้วรอจนเคลียร์ ++
+                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) → Q0.4 Emergency + Q0.6 Pause + immediate write ++
                 If inputs(DI_CURTAIN) Then
                     If Not outputs(DO_ROBOT_PAUSE) Then
-                        alarmMessage = "Light Curtain Interrupted — STANDBY (I0.3=ON)"
+                        alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON)"
                         Log("SAFETY", alarmMessage)
-                        outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
+                        outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
+                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
+                        ' CRITICAL: Immediate write to stop robot NOW
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
                     End If
-                    outputs(DO_LIGHT_YEL) = True
-                    outputs(DO_LIGHT_RED) = (animPulse Mod 4 < 2)  ' Red blink = standby
+                    outputs(DO_LIGHT_YEL) = False
+                    outputs(DO_LIGHT_RED) = True  ' Red solid = emergency
                     Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
                 End If
-                ' ม่านแสงเคลียร์แล้ว — resume จาก standby
+                ' ม่านแสงเคลียร์แล้ว — resume
                 If outputs(DO_ROBOT_PAUSE) Then
-                    outputs(DO_ROBOT_PAUSE) = False
+                    outputs(DO_ROBOT_ESTOP) = False   ' Q0.4 off
+                    outputs(DO_ROBOT_PAUSE) = False    ' Q0.6 off
+                    ' Immediate write to resume robot
+                    Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                    Catch : End Try
                     alarmMessage = ""
-                    Log("SAFETY", "Light Curtain Restored — Resuming (I0.3=OFF)")
+                    Log("SAFETY", "✓ Light Curtain Restored — Resuming (Q0.4=OFF Q0.6=OFF)")
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
@@ -730,6 +738,7 @@ Partial Class Form1
                     listReq.ContentType = "application/json"
                     listReq.ContentLength = 0
                     listReq.Timeout = 2000
+                    listReq.Headers.Add("Cache-Control", "no-cache")
                     Dim imgId As String = ""
                     Using listResp = Await Task.Run(Function() listReq.GetResponse())
                         Using sr As New IO.StreamReader(listResp.GetResponseStream())
@@ -743,9 +752,10 @@ Partial Class Form1
 
                     If Not String.IsNullOrEmpty(imgId) Then
                         ' Step 2: Fetch image by ID
-                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}"), System.Net.HttpWebRequest)
+                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}?_t={DateTime.Now.Ticks}"), System.Net.HttpWebRequest)
                         imgReq.Method = "GET"
                         imgReq.Timeout = 2000
+                        imgReq.Headers.Add("Cache-Control", "no-cache")
                         Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
                             Using imgStream = imgResp.GetResponseStream()
                                 Using ms As New IO.MemoryStream()
@@ -776,8 +786,9 @@ Partial Class Form1
                         Try
                             Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
                             req.Method = "GET"
-                            req.Timeout = 3000
+                            req.Timeout = 2000
                             req.UserAgent = "VBX/3.0"
+                            req.Headers.Add("Cache-Control", "no-cache")
                             Using resp = Await Task.Run(Function() req.GetResponse())
                                 Using respStream = resp.GetResponseStream()
                                     Using ms As New IO.MemoryStream()
@@ -1065,7 +1076,7 @@ Partial Class Form1
         AddHandler mainTimer.Tick, AddressOf SyncModbusAsync
         mainTimer.Start()
 
-        cameraTimer = New Timer With {.Interval = 800}
+        cameraTimer = New Timer With {.Interval = 500}
         AddHandler cameraTimer.Tick, AddressOf UpdateCameraFrameAsync
         cameraTimer.Start()
 
