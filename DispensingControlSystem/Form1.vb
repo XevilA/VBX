@@ -190,9 +190,14 @@ Partial Class Form1
 
         If currentState = MachineStatus.EMERGENCY_STOP Then
             outputs(DO_LIGHT_RED) = True
-            outputs(DO_ROBOT_ESTOP) = True   ' DO-03 Robot emergency
             outputs(DO_LIGHT_GRN) = False
             outputs(DO_LIGHT_YEL) = False
+            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency — FULL STOP
+            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause
+            outputs(DO_ROBOT_START) = False   ' Q0.5 off
+            ' CRITICAL: Immediate write to STOP robot NOW
+            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+            Catch : End Try
             Return
         End If
 
@@ -544,7 +549,15 @@ Partial Class Form1
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_YEL) = False
                 outputs(DO_LIGHT_GRN) = False
+                outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency — stop robot
+                outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause
+                outputs(DO_ROBOT_START) = False    ' Q0.5 off
+                ' Immediate write to stop robot NOW
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
                 If triggerReset Then
+                    outputs(DO_ROBOT_ESTOP) = False
+                    outputs(DO_ROBOT_PAUSE) = False
                     alarmMessage = ""
                     Log("SYSTEM", "Fault cleared — Resetting")
                     currentState = MachineStatus.IDLE
