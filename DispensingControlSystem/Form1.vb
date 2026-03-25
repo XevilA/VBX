@@ -382,15 +382,15 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) + debounce 500ms ++
-                If inputs(DI_CURTAIN) Then
+                ' ++ ม่านแสง NC: I0.3 ON = ปลอดภัย, I0.3 OFF = มีคนเข้า → Pause + debounce 500ms ++
+                If Not inputs(DI_CURTAIN) Then
                     curtainClearTime = DateTime.MinValue  ' Reset clear timer
                     If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     
-                    ' Debounce: ต้องบังต่อเนื่อง 500ms ถึง trigger
+                    ' Debounce: ต้อง OFF ต่อเนื่อง 500ms ถึง trigger
                     If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 500 Then
                         If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON) — Press START to override"
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
                             Log("SAFETY", alarmMessage)
                             outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
                             outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
@@ -398,11 +398,11 @@ Partial Class Form1
                             Catch : End Try
                         End If
                         outputs(DO_LIGHT_YEL) = False
-                        outputs(DO_LIGHT_RED) = True  ' Red solid = emergency
+                        outputs(DO_LIGHT_RED) = True  ' Red solid
                         
-                        ' ++ กด START ขณะ pause → override resume ++
+                        ' กด START ถึง resume ได้ (ไม่ auto-resume)
                         If triggerStart Then
-                            Log("SAFETY", "✓ Operator override — Resuming robot (clamp locked)")
+                            Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
                             outputs(DO_ROBOT_ESTOP) = False
                             outputs(DO_ROBOT_PAUSE) = False
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
@@ -410,28 +410,13 @@ Partial Class Form1
                             alarmMessage = ""
                             curtainBlockedTime = DateTime.MinValue
                         Else
-                            Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                            Return  ' รอกด START
                         End If
                     Else
-                        Return  ' ยังไม่ถึง debounce 500ms
+                        Return  ' รอ debounce 500ms
                     End If
                 Else
-                    curtainBlockedTime = DateTime.MinValue  ' Reset blocked timer
-                    ' ม่านแสงเคลียร์แล้ว — debounce 500ms ก่อน resume
-                    If outputs(DO_ROBOT_PAUSE) Then
-                        If curtainClearTime = DateTime.MinValue Then curtainClearTime = DateTime.Now
-                        If (DateTime.Now - curtainClearTime).TotalMilliseconds >= 500 Then
-                            outputs(DO_ROBOT_ESTOP) = False   ' Q0.4 off
-                            outputs(DO_ROBOT_PAUSE) = False    ' Q0.6 off
-                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                            Catch : End Try
-                            alarmMessage = ""
-                            curtainClearTime = DateTime.MinValue
-                            Log("SAFETY", "✓ Light Curtain Clear 500ms — Resuming (Q0.4=OFF Q0.6=OFF)")
-                        Else
-                            Return  ' รอ clear debounce
-                        End If
-                    End If
+                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = safe
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
