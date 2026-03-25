@@ -215,6 +215,7 @@ Partial Class Form1
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
+<<<<<<< HEAD
             ' ── 2. CLAMP_EXTEND: รอเซนเซอร์ยืนยันการล็อค ──
             Case MachineStatus.CLAMP_EXTEND
                 LockClamps(True) ' ค้างสถานะจ่าย 2,4
@@ -228,6 +229,32 @@ Partial Class Form1
                     alarmMessage = "Clamp Lock TIMEOUT (Check Sensors I1.2, I1.4)"
                     Log("CLAMP", "✗ " & alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
+=======
+            ' ── CLAMP_EXTEND: Keep clamp ON, wait BOTH extend sensors ──
+            Case MachineStatus.CLAMP_EXTEND
+                ' MUST keep clamp Lock outputs ON every cycle
+                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
+                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
+                outputs(DO_LIGHT_GRN) = False
+                outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
+
+                ' Require BOTH extend sensors (AND logic)
+                Dim bothExtended = inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2)
+                If bothExtended Then
+                    LogClampIO("✓ BOTH Extended — I1.1+I1.3=ON")
+                    currentState = MachineStatus.SCANNING
+                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
+                    LogClampIO($"⚠ Timeout 10s — I1.1={inputs(DI_CYL_EXT)} I1.3={inputs(DI_CYL_EXT2)}")
+                    If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
+                        Log("CLAMP", "⚠ Partial extend — proceeding with 1 sensor")
+                        currentState = MachineStatus.SCANNING
+                    Else
+                        Log("CLAMP", "✗ Clamp FAILED — no sensors. Returning to IDLE")
+                        alarmMessage = "Clamp extend failed — no sensor signal"
+                        ResetOutputs()
+                        currentState = MachineStatus.IDLE
+                    End If
+>>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
                 End If
 
             ' ── 3. SCANNING: ยิงบาร์โค้ด (ทำงานเมื่อล็อคแน่นแล้วเท่านั้น) ──
@@ -289,6 +316,7 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
+<<<<<<< HEAD
             ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
@@ -302,6 +330,14 @@ Partial Class Form1
                     alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
                     If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
                 End If
+=======
+            ' ── CURTAIN_CHECK: Log curtain status, always proceed ──
+            Case MachineStatus.CURTAIN_CHECK
+                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
+                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")}")
+                ' Always proceed — runtime safety during DISPENSE_RUNNING handles protection
+                currentState = MachineStatus.DISPENSE_START
+>>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
@@ -1676,8 +1712,14 @@ Partial Class Form1
                 $"FailCount={config.FailCount}",
                 "",
                 "[System]",
-                $"DebugLogEnabled={config.DebugLogEnabled}"
+                $"DebugLogEnabled={config.DebugLogEnabled}",
+                "",
+                "[Programs]"
             }
+            ' Add each program name as Program01=NAME, Program02=NAME...
+            For i = 0 To config.ProgramNames.Length - 1
+                lines.Add($"Program{(i + 1):D2}={config.ProgramNames(i)}")
+            Next
             IO.File.WriteAllLines(configPath, lines, Encoding.UTF8)
         Catch ex As Exception
             DebugLog($"CONFIG-SAVE-ERR: {ex.Message}")
@@ -1711,6 +1753,14 @@ Partial Class Form1
                     Case "PassCount" : Integer.TryParse(val, config.PassCount)
                     Case "FailCount" : Integer.TryParse(val, config.FailCount)
                     Case "DebugLogEnabled" : Boolean.TryParse(val, config.DebugLogEnabled)
+                    Case Else
+                        ' Handle ProgramXX keys
+                        If key.StartsWith("Program") AndAlso key.Length = 9 Then
+                            Dim idx As Integer
+                            If Integer.TryParse(key.Substring(7), idx) AndAlso idx >= 1 AndAlso idx <= config.ProgramNames.Length Then
+                                config.ProgramNames(idx - 1) = val
+                            End If
+                        End If
                 End Select
             Next
             ' Auto-save to update config file with any new/missing keys
