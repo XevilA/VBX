@@ -528,7 +528,8 @@ Partial Class Form1
                 End If
 
             Case MachineStatus.DISPENSE_DONE
-                LockClamps(True)
+                LockClamps(False) ' ★ User requested: Unlock clamp when dispensing is done
+                clampShouldBeLocked = False
                 outputs(DO_LIGHT_YEL) = False          ' ★ Flowchart: yellow OFF after dispense
                 outputs(DO_LIGHT_RED) = False
                 outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2) ' ★ Flowchart: green blink
@@ -539,7 +540,8 @@ Partial Class Form1
 
             ' ── 9. VISION_CHECK: สั่งกล้องตรวจสอบชิ้นงาน ──
             Case MachineStatus.VISION_CHECK
-                LockClamps(True)
+                LockClamps(False) ' ★ Clamp should remain unlocked
+                clampShouldBeLocked = False
                 Log("VISION", "Triggering Cognex Inspection...")
                 
                 Dim result = Await SendTcpHandshakeAsync(config.CognexIP, config.CognexPort, "T" & vbCr)
@@ -566,7 +568,8 @@ Partial Class Form1
 
             ' ── 10. ERROR WAIT: รอคนกดรับทราบ หรือ auto-retract 15 วินาที ──
             Case MachineStatus.MODEL_FAIL, MachineStatus.VISION_NG
-                LockClamps(True) ' ชิ้นงานเสียยังล็อคไว้
+                LockClamps(False) ' ★ Clamp should remain unlocked (User requested release after dispense)
+                clampShouldBeLocked = False
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_GRN) = False
                 
