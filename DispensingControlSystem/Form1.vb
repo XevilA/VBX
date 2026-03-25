@@ -1619,8 +1619,14 @@ Partial Class Form1
                 $"FailCount={config.FailCount}",
                 "",
                 "[System]",
-                $"DebugLogEnabled={config.DebugLogEnabled}"
+                $"DebugLogEnabled={config.DebugLogEnabled}",
+                "",
+                "[Programs]"
             }
+            ' Add each program name as Program01=NAME, Program02=NAME...
+            For i = 0 To config.ProgramNames.Length - 1
+                lines.Add($"Program{(i + 1):D2}={config.ProgramNames(i)}")
+            Next
             IO.File.WriteAllLines(configPath, lines, Encoding.UTF8)
         Catch ex As Exception
             DebugLog($"CONFIG-SAVE-ERR: {ex.Message}")
@@ -1654,6 +1660,14 @@ Partial Class Form1
                     Case "PassCount" : Integer.TryParse(val, config.PassCount)
                     Case "FailCount" : Integer.TryParse(val, config.FailCount)
                     Case "DebugLogEnabled" : Boolean.TryParse(val, config.DebugLogEnabled)
+                    Case Else
+                        ' Handle ProgramXX keys
+                        If key.StartsWith("Program") AndAlso key.Length = 9 Then
+                            Dim idx As Integer
+                            If Integer.TryParse(key.Substring(7), idx) AndAlso idx >= 1 AndAlso idx <= config.ProgramNames.Length Then
+                                config.ProgramNames(idx - 1) = val
+                            End If
+                        End If
                 End Select
             Next
             ' Auto-save to update config file with any new/missing keys
