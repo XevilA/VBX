@@ -158,21 +158,22 @@ Partial Class Form1
     Private doLeds(15) As Panel
 #End Region
 
-#Region "Core Machine Logic — ViscoTec Flowchart"
-    Private Async Function RunWorkflowAsync() As Task        ' Both physical Start buttons must be pressed together (safety two-hand control)
+#Region "Core Machine Logic — Production Flow & Double Acting Clamp"
+    Private Async Function RunWorkflowAsync() As Task
+        ' ── Safety: กดปุ่ม Start 2 มือพร้อมกัน หรือกดผ่าน HMI (F1) ──
         Dim triggerStart = isSoftwareStartRequested OrElse (inputs(DI_START) AndAlso inputs(DI_START2))
-
         Dim triggerReset = isSoftwareResetRequested
         isSoftwareStartRequested = False
         isSoftwareResetRequested = False
 
-        ' ── Global Safety: E-Stop (NC — must be HIGH) ──
+        ' ── Global Safety: E-Stop (I0.0 ต้อง ON เสมอในสภาวะปกติ) ──
         If Not inputs(DI_ESTOP) Then
             currentState = MachineStatus.EMERGENCY_STOP
             isEStopActive = True
             alarmMessage = "EMERGENCY STOP — I0.0 Safety Circuit Open"
         End If
 
+        ' ── เมื่อมีการกด Reset (F2) ──
         If triggerReset Then
             currentState = MachineStatus.IDLE
             isEStopActive = False
@@ -193,55 +194,58 @@ Partial Class Form1
         End If
 
         Select Case currentState
-            ' ── IDLE: Green ON, wait Start ──
+            ' ── 1. IDLE: รอการกด Start ──
             Case MachineStatus.IDLE
                 ResetOutputs()
-                outputs(DO_LIGHT_GRN) = True        ' Green = Ready
+                outputs(DO_LIGHT_GRN) = True
+                
+                ' ++ จ่ายไฟ 1,3 ค้างไว้เพื่อรักษาแรงดันลมฝั่ง Unlock ++
+                LockClamps(False) 
+
                 If triggerStart Then
                     cycleStartTime = DateTime.Now
                     clampStartTime = DateTime.Now
-                    ' Lock: Extend ON (Q1.5+Q1.7), Retract OFF (Q1.4+Q1.6)
-                    outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                    outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
-                    Log("CYCLE", "▶ Start — Clamp Cylinder Extend")
-                    LogClampIO("LOCK → Extend ON")
+                    
+                    ' สั่ง Lock (ดับ 1,3 จ่าย 2,4)
+                    LockClamps(True)
+                    outputs(DO_LIGHT_GRN) = False
+                    outputs(DO_LIGHT_YEL) = True
+                    
+                    Log("CYCLE", "▶ Start — Clamping Workpiece")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-            ' ── CLAMP_EXTEND: Keep clamp ON, wait cylinder extend sensor ──
+            ' ── 2. CLAMP_EXTEND: รอเซนเซอร์ยืนยันการล็อค ──
             Case MachineStatus.CLAMP_EXTEND
-                ' MUST keep clamp Lock outputs ON every cycle
-                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
-                outputs(DO_LIGHT_GRN) = False
-                outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
-                If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                    LogClampIO("✓ Extended — Sensor confirmed")
+                LockClamps(True) ' ค้างสถานะจ่าย 2,4
+                
+                ' เช็คว่าเซนเซอร์ล็อค (I1.2 และ I1.4) ติดครบ 2 ฝั่งหรือไม่
+                If inputs(DI_CYL_RET) AndAlso inputs(DI_CYL_RET2) Then
+                    Log("CLAMP", "✓ Locked — Sensors Confirmed (I1.2, I1.4)")
                     currentState = MachineStatus.SCANNING
                 ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    LogClampIO("⚠ Extend TIMEOUT 10s — Proceeding")
-                    currentState = MachineStatus.SCANNING
+                    ' ถ้ารอเกิน 10 วินาทีแล้วเซนเซอร์ไม่ติด -> ตัดเป็น Error
+                    alarmMessage = "Clamp Lock TIMEOUT (Check Sensors I1.2, I1.4)"
+                    Log("CLAMP", "✗ " & alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            ' ── SCANNING: Barcode scan via Keyence Ethernet ──
+            ' ── 3. SCANNING: ยิงบาร์โค้ด (ทำงานเมื่อล็อคแน่นแล้วเท่านั้น) ──
             Case MachineStatus.SCANNING
-                ' Keep clamp locked during scan
-                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
-                outputs(DO_LIGHT_YEL) = True
+                LockClamps(True)
                 Log("SCAN", "Acquiring Barcode...")
                 Dim barcode = Await ReadBarcodeAsync()
+                
                 If Not String.IsNullOrEmpty(barcode) AndAlso barcode <> "ERROR" AndAlso barcode <> "ER" AndAlso barcode <> "TIMEOUT" Then
                     lastBarcode = barcode
                     isScannerLive = True
                     scanRetryCount = 0
-                    Log("SCAN", $"Barcode: {barcode}")
+                    Log("SCAN", $"✓ Barcode: {barcode}")
                     currentState = MachineStatus.MODEL_CHECK
                 Else
                     scanRetryCount += 1
                     isScannerLive = False
                     If scanRetryCount >= 3 Then
-                        ' After 3 failures — unlock and retract
                         alarmMessage = "Scanner read failed after 3 attempts"
                         Log("SCAN", "✗ " & alarmMessage)
                         scanRetryCount = 0
@@ -252,153 +256,196 @@ Partial Class Form1
                     End If
                 End If
 
-            ' ── MODEL_CHECK: Flowchart Phase 3 ─ Check barcode vs Master ──
+            ' ── 4. MODEL_CHECK: เช็คบาร์โค้ด + เลือกโปรแกรมอัตโนมัติ ──
             Case MachineStatus.MODEL_CHECK
-                ' Keep clamp locked
-                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
+                LockClamps(True)
+                
+                ' บังคับเลือก Program 01 เสมอ
+                cbProgramSelect.Invoke(Sub() cbProgramSelect.SelectedIndex = 0)
+
                 If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
-                    ' Match or wildcard → proceed to dispensing
-                    Log("VERIFY", $"✓ Model Match: {lastBarcode}")
+                    Log("VERIFY", $"✓ Model Match: {lastBarcode} -> Waiting for Start Confirmation")
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
-                    Log("SYSTEM", "▶ Press START to run dispensing program")
+                    
+                    ' +++ เปลี่ยนตรงนี้: ให้ไปรอคนกดปุ่ม Start อีกครั้ง +++
                     currentState = MachineStatus.WAIT_START_CONFIRM
                 Else
-                    ' NG: Red light, popup, wait Start to retract
-                    alarmMessage = $"Wrong PWBA! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
+                    alarmMessage = $"Wrong Model! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
                     Log("VERIFY", $"✗ {alarmMessage}")
                     AddScanHistory(lastBarcode, "❌ REJECT")
                     currentState = MachineStatus.MODEL_FAIL
                 End If
-
-            ' ── MODEL_FAIL: Red ON, UNLOCK clamp, wait acknowledge ──
-            Case MachineStatus.MODEL_FAIL
-                ' Unlock: Retract ON (Q1.4+Q1.6), Extend OFF (Q1.5+Q1.7)
-                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
-                outputs(DO_LIGHT_RED) = True
-                outputs(DO_LIGHT_YEL) = False
-                outputs(DO_LIGHT_GRN) = False
-                ' Wait for operator press Start to acknowledge
-                If triggerStart Then
-                    Log("SYSTEM", "Operator acknowledged — Retracting")
-                    LogClampIO("UNLOCK → Retract ON (MODEL_FAIL)")
-                    clampStartTime = DateTime.Now
-                    currentState = MachineStatus.MODEL_FAIL_RETRACT
-                End If
-
-            ' ── MODEL_FAIL_RETRACT: Wait retract then IDLE ──
-            Case MachineStatus.MODEL_FAIL_RETRACT
-                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
-                    outputs(DO_LIGHT_RED) = False
-                    outputs(DO_LIGHT_GRN) = True
-                    alarmMessage = ""
-                    lastBarcode = ""
-                    Log("CLAMP", "✓ Retracted — Remove Part")
-                    LogClampIO("✓ Retracted (MODEL_FAIL)")
-                    config.FailCount += 1 : SaveSettings()
-                    currentState = MachineStatus.IDLE
-                End If
-
-            ' ── WAIT_START_CONFIRM: Barcode OK, wait 2nd Start press to run robot ──
+            ' ── 4.5 WAIT_START_CONFIRM: รอ Operator กดปุ่ม Start อีกครั้งเพื่อรันหุ่นยนต์ ──
             Case MachineStatus.WAIT_START_CONFIRM
-                ' Keep clamp locked
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                ' Green blink = ready for operator confirmation
+                LockClamps(True) ' ชิ้นงานยังถูกล็อคอยู่
+                
+                ' ให้ไฟเขียวกะพริบ เพื่อบอกคนคุมเครื่องว่า "พร้อมรันแล้ว ให้กด Start ได้เลย"
                 outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
                 outputs(DO_LIGHT_YEL) = False
+                
+                ' รอกดปุ่ม Start (I0.1 + I0.2) รอบที่สอง
                 If triggerStart Then
                     Log("CYCLE", "▶ Operator confirmed — Starting dispensing")
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── CURTAIN_CHECK: Safety curtain (I0.3=ON=Safe, OFF=Blocked) ──
+            ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
             Case MachineStatus.CURTAIN_CHECK
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                If inputs(DI_CURTAIN) Then
-                    Log("SAFETY", "✓ Light Curtain Active (I0.3=ON)")
+                LockClamps(True)
+                
+                ' ++ สลับ Logic: ถ้าไม่มีคนบัง (I0.3 = OFF) คือปลอดภัย ให้ไปต่อ ++
+                If Not inputs(DI_CURTAIN) Then
+                    Log("SAFETY", "✓ Light Curtain Clear (I0.3=OFF)")
                     currentState = MachineStatus.DISPENSE_START
                 Else
-                    alarmMessage = "Safety Light Curtain NOT Active (I0.3=OFF)"
-                    Log("SAFETY", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
+                    ' ถ้ามีคนบัง (I0.3 = ON) ให้หยุดรอจนกว่าจะชักมือออก
+                    alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
+                    If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
                 End If
 
-            ' ── DISPENSE_START: Send program + robot start ──
+            ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                outputs(DO_LIGHT_YEL) = True
-                ' Step 1: Set program bits (Q1.0-Q1.3)
-                UpdateProgramBits()
-                Dim progNum = cbProgramSelect.SelectedIndex + 1
-                Log("ROBOT", $"Program bits set: {progNum} [Q1.0={outputs(DO_PROG_BIT0)} Q1.1={outputs(DO_PROG_BIT1)} Q1.2={outputs(DO_PROG_BIT2)} Q1.3={outputs(DO_PROG_BIT3)}]")
-                ' Step 2: LOAD signal ON (Q0.7)
-                outputs(DO_PROG_LOAD) = True
-                ' Write outputs to Modbus so hardware sees program bits + LOAD
-                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
-                Log("ROBOT", "Q0.7 LOAD=ON → Waiting 300ms...")
+                LockClamps(True)
+                UpdateProgramBits() ' ส่งบิตโปรแกรมไปยัง PLC
+                
+                ' ยิง Pulse LOAD (Q0.7)
+                outputs(DO_PROG_LOAD) = True         
                 Await Task.Delay(300)
-                ' Step 3: Robot Start pulse (Q0.5 ON for 500ms)
-                outputs(DO_ROBOT_START) = True
-                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
-                Log("ROBOT", "Q0.5 START=ON → Pulse 500ms...")
+                outputs(DO_PROG_LOAD) = False
+                
+                Await Task.Delay(100)
+                
+                ' ยิง Pulse START (Q0.5)
+                outputs(DO_ROBOT_START) = True       
                 Await Task.Delay(500)
                 outputs(DO_ROBOT_START) = False
-                Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
-                Log("ROBOT", $"▶ Dispensing Program {progNum} Started — Q0.5=OFF, waiting I0.5 complete")
-                DebugLog($"ROBOT-IO: LOAD={outputs(DO_PROG_LOAD)} START={outputs(DO_ROBOT_START)} RUNNING={inputs(DI_ROBOT_RUN)} DONE={inputs(DI_ROBOT_DONE)} FAULT={inputs(DI_ROBOT_FAULT)}")
+                
+                Log("ROBOT", "▶ Robot Dispensing Started")
+                
+                ' จับเวลาไว้เช็คว่าหุ่นยนต์ยอมเดินไหม
+                clampStartTime = DateTime.Now 
                 currentState = MachineStatus.DISPENSE_RUNNING
-
-            ' ── DISPENSE_RUNNING: Wait robot complete ──
+                
+           ' ── 7. DISPENSE_RUNNING: หุ่นยนต์กำลังทำงาน (ม่านแสงมีผลแค่จุดนี้) ──
             Case MachineStatus.DISPENSE_RUNNING
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                ' Safety: curtain must stay ON during dispensing
-                If Not inputs(DI_CURTAIN) Then
-                    alarmMessage = "Light Curtain Interrupted During Dispensing! (I0.3=OFF)"
+                LockClamps(True)
+                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
+                
+                ' ++ ถ้ามีคนเอามือไปบังม่านแสง (I0.3 = ON) ระหว่างหุ่นยนต์เดิน -> ตัดฉุกเฉินทันที! ++
+                If inputs(DI_CURTAIN) Then
+                    alarmMessage = "EMERGENCY: Light Curtain Interrupted! (I0.3=ON)"
                     Log("SAFETY", alarmMessage)
-                    outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause robot
+                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
                     currentState = MachineStatus.EMERGENCY_STOP
                     Return
                 End If
-                ' Yellow blink effect
-                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2)
-                If inputs(DI_ROBOT_DONE) Then         ' I0.5 Robot Complete
+                
+                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
+                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
+                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
+                    Return
+                End If
+
+                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
+                If inputs(DI_ROBOT_DONE) Then         
                     Log("ROBOT", "✓ Dispensing Complete")
                     outputs(DO_LIGHT_YEL) = False
-                    outputs(DO_PROG_LOAD) = False
                     currentState = MachineStatus.DISPENSE_DONE
-                ElseIf inputs(DI_ROBOT_FAULT) Then    ' I0.6 Robot Fault
+                ElseIf inputs(DI_ROBOT_FAULT) Then    
+                    alarmMessage = "Robot Fault Signal (I0.6)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
+                End If
+                LockClamps(True)
+                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
+                
+                ' ++ สลับ Logic: ถ้ามีคนเอามือไปบัง (I0.3 = ON) ตัดฉุกเฉินทันที! ++
+                If inputs(DI_CURTAIN) Then
+                    alarmMessage = "EMERGENCY: Light Curtain Interrupted! (I0.3=ON)"
+                    Log("SAFETY", alarmMessage)
+                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
+                    currentState = MachineStatus.EMERGENCY_STOP
+                    Return
+                End If
+                
+                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
+                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
+                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
+                    Return
+                End If
+
+                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
+                If inputs(DI_ROBOT_DONE) Then         
+                    Log("ROBOT", "✓ Dispensing Complete")
+                    outputs(DO_LIGHT_YEL) = False
+                    currentState = MachineStatus.DISPENSE_DONE
+                ElseIf inputs(DI_ROBOT_FAULT) Then    
+                    alarmMessage = "Robot Fault Signal (I0.6)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
+                End If
+                LockClamps(True)
+                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
+                
+                ' ม่านแสงต้องปลอดภัยตลอดการทำงาน ถ้าบัง = หยุดฉุกเฉิน
+                If Not inputs(DI_CURTAIN) Then
+                    alarmMessage = "Light Curtain Interrupted During Dispensing! (I0.3=OFF)"
+                    Log("SAFETY", alarmMessage)
+                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
+                    currentState = MachineStatus.EMERGENCY_STOP
+                    Return
+                End If
+                
+                ' --- เพิ่มการเช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
+                ' ถ้ารอมาเกิน 3 วินาทีแล้ว สัญญาณ Running (I0.4) ยังไม่มา และสัญญาณ Done (I0.5) ก็ไม่มา
+                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
+                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
+                    Return
+                End If
+
+                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
+                If inputs(DI_ROBOT_DONE) Then         
+                    Log("ROBOT", "✓ Dispensing Complete")
+                    outputs(DO_LIGHT_YEL) = False
+                    currentState = MachineStatus.DISPENSE_DONE
+                ElseIf inputs(DI_ROBOT_FAULT) Then    
                     alarmMessage = "Robot Fault Signal (I0.6)"
                     Log("FAULT", alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            ' ── DISPENSE_DONE: Green blink then vision ──
+            ' ── 8. DISPENSE_DONE: หุ่นยนต์ถอย ──
             Case MachineStatus.DISPENSE_DONE
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
+                LockClamps(True)
                 outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
-                Await Task.Delay(800)
+                
+                ' รอ 1.5 วิ ให้แขนหุ่นยนต์ถอยพ้นหน้ากล้อง
+                Await Task.Delay(1500)
                 currentState = MachineStatus.VISION_CHECK
 
-            ' ── VISION_CHECK: Trigger Cognex inspection ──
+            ' ── 9. VISION_CHECK: สั่งกล้องตรวจสอบชิ้นงาน ──
             Case MachineStatus.VISION_CHECK
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
+                LockClamps(True)
                 Log("VISION", "Triggering Cognex Inspection...")
+                
                 Dim result = Await SendTcpHandshakeAsync(config.CognexIP, config.CognexPort, "T" & vbCr)
                 lastVisionResult = result
-                ' Check I/O signals + TCP response
+                
                 Dim isOK = inputs(DI_VISION_OK) OrElse result.ToUpper().Contains("OK") OrElse result.Contains("1")
                 Dim isNG = inputs(DI_VISION_NG)
+                
                 If isOK AndAlso Not isNG Then
                     Log("VISION", "✓ Inspection PASSED")
                     lastVisionResult = "PASS"
                     config.PassCount += 1 : SaveSettings()
                     UpdateScanHistoryStatus(lastBarcode, "✅ PASS")
-                    ' Unlock: Retract ON, Extend OFF
-                    outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                    outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
+                    
                     clampStartTime = DateTime.Now
                     currentState = MachineStatus.VISION_OK_RETRACT
                 Else
@@ -409,75 +456,91 @@ Partial Class Form1
                     currentState = MachineStatus.VISION_NG
                 End If
 
-            ' ── VISION_OK_RETRACT: Wait retract → complete ──
-            Case MachineStatus.VISION_OK_RETRACT
-                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
-                    outputs(DO_LIGHT_GRN) = True
-                    cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
-                    Log("CYCLE", $"✓ Cycle Complete ({cycleDuration:F2}s)")
-                    LogClampIO("✓ Retracted (VISION_OK)")
-                    currentState = MachineStatus.CYCLE_COMPLETE
-                End If
-
-            ' ── VISION_NG: Red ON, wait acknowledge ──
-            Case MachineStatus.VISION_NG
+            ' ── 10. ERROR WAIT: รอคนกดรับทราบก่อนปลดล็อคชิ้นงาน NG ──
+            Case MachineStatus.MODEL_FAIL, MachineStatus.VISION_NG
+                LockClamps(True) ' ชิ้นงานเสียยังล็อคไว้
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_GRN) = False
-                alarmMessage = "Vision Inspection FAILED — NG"
+                
                 If triggerStart Then
-                    Log("SYSTEM", "Operator acknowledged NG — Retracting")
-                    ' Unlock: Retract ON, Extend OFF
-                    outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                    outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
-                    LogClampIO("UNLOCK → Retract ON (VISION_NG)")
+                    Log("SYSTEM", "Operator acknowledged NG — Unlocking")
                     clampStartTime = DateTime.Now
-                    currentState = MachineStatus.VISION_NG_RETRACT
+                    If currentState = MachineStatus.MODEL_FAIL Then
+                        currentState = MachineStatus.MODEL_FAIL_RETRACT
+                    Else
+                        currentState = MachineStatus.VISION_NG_RETRACT
+                    End If
                 End If
 
-            ' ── VISION_NG_RETRACT: Retract then IDLE ──
-            Case MachineStatus.VISION_NG_RETRACT
-                outputs(DO_CLAMP2) = False : outputs(DO_CLAMP4) = False
-                outputs(DO_CLAMP) = True   : outputs(DO_CLAMP3) = True
-                If inputs(DI_CYL_RET) OrElse inputs(DI_CYL_RET2) OrElse (DateTime.Now - clampStartTime).TotalSeconds > 5 Then
-                    outputs(DO_LIGHT_RED) = False
-                    outputs(DO_LIGHT_GRN) = True
-                    alarmMessage = ""
-                    Log("CLAMP", "✓ Retracted — Remove NG Part")
-                    currentState = MachineStatus.IDLE
+            ' ── 11. RETRACT: ถอยแคลมป์เพื่อปลดล็อคชิ้นงาน (จ่าย 1,3) ──
+            Case MachineStatus.VISION_OK_RETRACT, MachineStatus.MODEL_FAIL_RETRACT, MachineStatus.VISION_NG_RETRACT
+                LockClamps(False) ' สั่ง Unlock (จ่าย 1,3 ดับ 2,4)
+                
+                ' รอเซนเซอร์ปลดล็อคยืนยัน (I1.1 และ I1.3)
+                If inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2) Then
+                    If currentState = MachineStatus.VISION_OK_RETRACT Then
+                        outputs(DO_LIGHT_GRN) = True
+                        cycleDuration = (DateTime.Now - cycleStartTime).TotalSeconds
+                        Log("CYCLE", $"✓ Cycle Complete ({cycleDuration:F2}s)")
+                        currentState = MachineStatus.CYCLE_COMPLETE
+                    Else
+                        ' กรณีจบงานเสีย
+                        outputs(DO_LIGHT_RED) = False
+                        outputs(DO_LIGHT_GRN) = True
+                        alarmMessage = ""
+                        lastBarcode = "N/A"
+                        Log("CLAMP", "✓ Unlocked — Remove NG Part")
+                        currentState = MachineStatus.IDLE
+                    End If
+                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
+                    alarmMessage = "Clamp Unlock TIMEOUT (Check Sensors I1.1, I1.3)"
+                    currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            ' ── CYCLE_COMPLETE: Green ON, reset outputs → IDLE ──
+            ' ── 12. CYCLE_COMPLETE: จบการทำงานแบบสมบูรณ์ ──
             Case MachineStatus.CYCLE_COMPLETE
                 outputs(DO_LIGHT_GRN) = True
-                ' Reset all work outputs (keep green light)
-                outputs(DO_PROG_LOAD) = False
-                outputs(DO_ROBOT_START) = False
-                outputs(DO_ROBOT_PAUSE) = False
-                outputs(DO_ROBOT_ESTOP) = False
-                Log("DATA", "Sending data to server...")
-                ' TODO: server data upload here
+                ' ส่งข้อมูลไป Server (ถ้ามี)
                 Await Task.Delay(500)
                 currentState = MachineStatus.IDLE
 
-            ' ── FAULT_ALARM: Generic fault ──
+            ' ── 13. FAULT_ALARM: แจ้งเตือนข้อผิดพลาดระบบ ──
             Case MachineStatus.FAULT_ALARM
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_YEL) = False
                 outputs(DO_LIGHT_GRN) = False
                 If triggerReset Then
-                    ' Reset ALL outputs back to safe state
-                    For i = 0 To outputs.Length - 1
-                        outputs(i) = False
-                    Next
-                    outputs(DO_LIGHT_GRN) = True  ' Green = Ready
                     alarmMessage = ""
-                    Log("SYSTEM", "Fault cleared — All outputs reset")
+                    Log("SYSTEM", "Fault cleared — Resetting")
                     currentState = MachineStatus.IDLE
                 End If
         End Select
     End Function
+
+    ' ==========================================================
+    ' ── ฟังก์ชันช่วยจัดการ Double Acting Clamp (1,3=Unlock / 2,4=Lock) ──
+    ' ==========================================================
+    Private Sub LockClamps(isLock As Boolean)
+        If isLock Then
+            ' LOCK: จ่าย 2,4 | ดับ 1,3
+            outputs(DO_CLAMP) = False    ' Q1.4 (Unlock 1) = OFF
+            outputs(DO_CLAMP3) = False   ' Q1.6 (Unlock 3) = OFF
+            outputs(DO_CLAMP2) = True    ' Q1.5 (Lock 2)   = ON
+            outputs(DO_CLAMP4) = True    ' Q1.7 (Lock 4)   = ON
+        Else
+            ' UNLOCK: จ่าย 1,3 | ดับ 2,4
+            outputs(DO_CLAMP2) = False   ' Q1.5 (Lock 2)   = OFF
+            outputs(DO_CLAMP4) = False   ' Q1.7 (Lock 4)   = OFF
+            outputs(DO_CLAMP) = True     ' Q1.4 (Unlock 1) = ON
+            outputs(DO_CLAMP3) = True    ' Q1.6 (Unlock 3) = ON
+        End If
+    End Sub
+
+    Private Sub LogClampIO(action As String)
+        Dim doStatus = $"DO[1,3=UN({If(outputs(DO_CLAMP) And outputs(DO_CLAMP3), "ON", "OFF")}) 2,4=LCK({If(outputs(DO_CLAMP2) And outputs(DO_CLAMP4), "ON", "OFF")})]"
+        Dim diStatus = $"DI[Unl1,3({If(inputs(DI_CYL_EXT) And inputs(DI_CYL_EXT2), "ON", "OFF")}) Lck2,4({If(inputs(DI_CYL_RET) And inputs(DI_CYL_RET2), "ON", "OFF")})]"
+        DebugLog($"CLAMP: {action} | {doStatus} | {diStatus}")
+    End Sub
 #End Region
 
 #Region "Hardware Handlers"
