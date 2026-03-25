@@ -35,6 +35,7 @@ Partial Class Form1
         Public Property CameraUrl As String = "http://192.168.1.20/cam0/img/listIds"  ' Cognex In-Sight 2800 API (auto-detect)
         Public Property CameraSourcePath As String = ""  ' FTP or local file path (leave empty = use CameraUrl HTTP)
         Public Property MasterBarcode As String = "*"   ' "*" = accept all, or set specific barcode to filter
+        Public Property BarcodeProgramMap As New Dictionary(Of String, Integer)  ' Barcode → Program# auto-select
         Public Property DebugLogEnabled As Boolean = True
         Public Property ProgramNames As String() = Enumerable.Range(1, 15).Select(Function(i) $"PROGRAM {i:D2}").ToArray()
     End Class
@@ -148,7 +149,7 @@ Partial Class Form1
     Private lblStatsPass, lblStatsFail, lblStatsTime, lblStatsYield As Label
     Private cbProgramSelect As ComboBox
     Private isModbusLive, isVisionLive, isScannerLive, isProcessing, isNetWorking As Boolean
-    Private Shared httpClient As New System.Net.Http.HttpClient() With {.Timeout = TimeSpan.FromSeconds(5)}
+    Private Shared httpClient As New System.Net.Http.HttpClient() With {.Timeout = TimeSpan.FromSeconds(2)}
     Private modbusReconnectCooldown As Integer = 0
     Private cameraNoSignalBmp As Bitmap
     Private logoCached As Image
@@ -210,12 +211,17 @@ Partial Class Form1
                     LockClamps(True)
                     outputs(DO_LIGHT_GRN) = False
                     outputs(DO_LIGHT_YEL) = True
-                    
+                    ' CRITICAL: Immediately write clamp outputs to hardware
+                    ' so physical clamp starts extending NOW, not on next tick
+                    Try
+                        If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then
+                            modbusClient.WriteMultipleCoils(0, outputs)
+                        End If
+                    Catch : End Try
                     Log("CYCLE", "▶ Start — Clamping Workpiece")
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-<<<<<<< HEAD
             ' ── 2. CLAMP_EXTEND: รอเซนเซอร์ยืนยันการล็อค ──
             Case MachineStatus.CLAMP_EXTEND
                 LockClamps(True) ' ค้างสถานะจ่าย 2,4
@@ -229,32 +235,6 @@ Partial Class Form1
                     alarmMessage = "Clamp Lock TIMEOUT (Check Sensors I1.2, I1.4)"
                     Log("CLAMP", "✗ " & alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
-=======
-            ' ── CLAMP_EXTEND: Keep clamp ON, wait BOTH extend sensors ──
-            Case MachineStatus.CLAMP_EXTEND
-                ' MUST keep clamp Lock outputs ON every cycle
-                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
-                outputs(DO_LIGHT_GRN) = False
-                outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
-
-                ' Require BOTH extend sensors (AND logic)
-                Dim bothExtended = inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2)
-                If bothExtended Then
-                    LogClampIO("✓ BOTH Extended — I1.1+I1.3=ON")
-                    currentState = MachineStatus.SCANNING
-                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    LogClampIO($"⚠ Timeout 10s — I1.1={inputs(DI_CYL_EXT)} I1.3={inputs(DI_CYL_EXT2)}")
-                    If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                        Log("CLAMP", "⚠ Partial extend — proceeding with 1 sensor")
-                        currentState = MachineStatus.SCANNING
-                    Else
-                        Log("CLAMP", "✗ Clamp FAILED — no sensors. Returning to IDLE")
-                        alarmMessage = "Clamp extend failed — no sensor signal"
-                        ResetOutputs()
-                        currentState = MachineStatus.IDLE
-                    End If
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
                 End If
 
             ' ── 3. SCANNING: ยิงบาร์โค้ด (ทำงานเมื่อล็อคแน่นแล้วเท่านั้น) ──
@@ -292,6 +272,14 @@ Partial Class Form1
 
                 If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
                     Log("VERIFY", $"✓ Model Match: {lastBarcode} -> Waiting for Start Confirmation")
+                    ' Auto-select program from barcode mapping
+                    If config.BarcodeProgramMap.ContainsKey(lastBarcode) Then
+                        Dim progIdx = config.BarcodeProgramMap(lastBarcode) - 1
+                        If progIdx >= 0 AndAlso progIdx < cbProgramSelect.Items.Count Then
+                            cbProgramSelect.Invoke(Sub() cbProgramSelect.SelectedIndex = progIdx)
+                            Log("PROGRAM", $"Auto-selected Program {progIdx + 1} for barcode {lastBarcode}")
+                        End If
+                    End If
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     
                     ' +++ เปลี่ยนตรงนี้: ให้ไปรอคนกดปุ่ม Start อีกครั้ง +++
@@ -316,7 +304,6 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-<<<<<<< HEAD
             ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
@@ -330,14 +317,6 @@ Partial Class Form1
                     alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
                     If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
                 End If
-=======
-            ' ── CURTAIN_CHECK: Log curtain status, always proceed ──
-            Case MachineStatus.CURTAIN_CHECK
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")}")
-                ' Always proceed — runtime safety during DISPENSE_RUNNING handles protection
-                currentState = MachineStatus.DISPENSE_START
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
@@ -367,77 +346,25 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ ถ้ามีคนเอามือไปบังม่านแสง (I0.3 = ON) ระหว่างหุ่นยนต์เดิน -> ตัดฉุกเฉินทันที! ++
+                ' ++ STANDBY mode: ถ้ามีคนเอามือไปบังม่านแสง (I0.3 = ON) -> pause แล้วรอจนเคลียร์ ++
                 If inputs(DI_CURTAIN) Then
-                    alarmMessage = "EMERGENCY: Light Curtain Interrupted! (I0.3=ON)"
-                    Log("SAFETY", alarmMessage)
-                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
-                    currentState = MachineStatus.EMERGENCY_STOP
-                    Return
+                    If Not outputs(DO_ROBOT_PAUSE) Then
+                        alarmMessage = "Light Curtain Interrupted — STANDBY (I0.3=ON)"
+                        Log("SAFETY", alarmMessage)
+                        outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
+                    End If
+                    outputs(DO_LIGHT_YEL) = True
+                    outputs(DO_LIGHT_RED) = (animPulse Mod 4 < 2)  ' Red blink = standby
+                    Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                End If
+                ' ม่านแสงเคลียร์แล้ว — resume จาก standby
+                If outputs(DO_ROBOT_PAUSE) Then
+                    outputs(DO_ROBOT_PAUSE) = False
+                    alarmMessage = ""
+                    Log("SAFETY", "Light Curtain Restored — Resuming (I0.3=OFF)")
                 End If
                 
                 ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
-                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
-                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                    Return
-                End If
-
-                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
-                If inputs(DI_ROBOT_DONE) Then         
-                    Log("ROBOT", "✓ Dispensing Complete")
-                    outputs(DO_LIGHT_YEL) = False
-                    currentState = MachineStatus.DISPENSE_DONE
-                ElseIf inputs(DI_ROBOT_FAULT) Then    
-                    alarmMessage = "Robot Fault Signal (I0.6)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                End If
-                LockClamps(True)
-                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
-                
-                ' ++ สลับ Logic: ถ้ามีคนเอามือไปบัง (I0.3 = ON) ตัดฉุกเฉินทันที! ++
-                If inputs(DI_CURTAIN) Then
-                    alarmMessage = "EMERGENCY: Light Curtain Interrupted! (I0.3=ON)"
-                    Log("SAFETY", alarmMessage)
-                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
-                    currentState = MachineStatus.EMERGENCY_STOP
-                    Return
-                End If
-                
-                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
-                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
-                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                    Return
-                End If
-
-                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
-                If inputs(DI_ROBOT_DONE) Then         
-                    Log("ROBOT", "✓ Dispensing Complete")
-                    outputs(DO_LIGHT_YEL) = False
-                    currentState = MachineStatus.DISPENSE_DONE
-                ElseIf inputs(DI_ROBOT_FAULT) Then    
-                    alarmMessage = "Robot Fault Signal (I0.6)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                End If
-                LockClamps(True)
-                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
-                
-                ' ม่านแสงต้องปลอดภัยตลอดการทำงาน ถ้าบัง = หยุดฉุกเฉิน
-                If Not inputs(DI_CURTAIN) Then
-                    alarmMessage = "Light Curtain Interrupted During Dispensing! (I0.3=OFF)"
-                    Log("SAFETY", alarmMessage)
-                    outputs(DO_ROBOT_PAUSE) = True    ' สั่งหุ่นยนต์ Pause
-                    currentState = MachineStatus.EMERGENCY_STOP
-                    Return
-                End If
-                
-                ' --- เพิ่มการเช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
-                ' ถ้ารอมาเกิน 3 วินาทีแล้ว สัญญาณ Running (I0.4) ยังไม่มา และสัญญาณ Done (I0.5) ก็ไม่มา
                 If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
                     alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
                     Log("FAULT", alarmMessage)
@@ -777,7 +704,7 @@ Partial Class Form1
                     listReq.Method = "POST"
                     listReq.ContentType = "application/json"
                     listReq.ContentLength = 0
-                    listReq.Timeout = 3000
+                    listReq.Timeout = 2000
                     Dim imgId As String = ""
                     Using listResp = Await Task.Run(Function() listReq.GetResponse())
                         Using sr As New IO.StreamReader(listResp.GetResponseStream())
@@ -793,7 +720,7 @@ Partial Class Form1
                         ' Step 2: Fetch image by ID
                         Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}"), System.Net.HttpWebRequest)
                         imgReq.Method = "GET"
-                        imgReq.Timeout = 5000
+                        imgReq.Timeout = 2000
                         Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
                             Using imgStream = imgResp.GetResponseStream()
                                 Using ms As New IO.MemoryStream()
@@ -1613,6 +1540,17 @@ Partial Class Form1
             flp.Controls.Add(New Label With {.Text = "PRODUCTION", .ForeColor = CLR_ACCENT, .Font = New Font("Segoe UI", 10, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(0, 16, 0, 10)})
             Dim tB = AddConfigField(flp, "Master Barcode (* = any)", config.MasterBarcode)
 
+            ' Barcode → Program mapping button
+            Dim btnBarcodeMap As New Button With {
+                .Text = "📱  BARCODE → PROGRAM MAPPING", .Height = 42, .Width = 380,
+                .BackColor = Color.FromArgb(40, 80, 120), .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 10),
+                .Margin = New Padding(0, 8, 0, 0)
+            }
+            btnBarcodeMap.FlatAppearance.BorderSize = 0
+            AddHandler btnBarcodeMap.Click, Sub() ShowBarcodeProgramDialog()
+            flp.Controls.Add(btnBarcodeMap)
+
             ' Reset counters button
             Dim btnResetCounters As New Button With {
                 .Text = "RESET COUNTERS", .Height = 36, .Width = 380, .BackColor = CLR_WARN,
@@ -1677,6 +1615,110 @@ Partial Class Form1
         End Using
     End Sub
 
+    Private Sub ShowBarcodeProgramDialog()
+        Using dlg As New Form With {
+            .Text = "📱 BARCODE → PROGRAM MAPPING",
+            .Size = New Size(560, 520),
+            .StartPosition = FormStartPosition.CenterParent,
+            .BackColor = CLR_BG, .ForeColor = CLR_TEXT,
+            .FormBorderStyle = FormBorderStyle.FixedDialog,
+            .MaximizeBox = False, .MinimizeBox = False
+        }
+            Dim lblTitle As New Label With {
+                .Text = "📱 Barcode → Program Mapping",
+                .Font = New Font("Segoe UI", 14, FontStyle.Bold),
+                .ForeColor = CLR_ACCENT, .Dock = DockStyle.Top, .Height = 44,
+                .TextAlign = ContentAlignment.MiddleCenter, .BackColor = CLR_PANEL
+            }
+            Dim lblDesc As New Label With {
+                .Text = "Define which barcode auto-selects which dispensing program." & vbCrLf & "When a scanned barcode matches, the program is set automatically.",
+                .Font = New Font("Segoe UI", 9), .ForeColor = CLR_DIM,
+                .Dock = DockStyle.Top, .Height = 42, .TextAlign = ContentAlignment.MiddleCenter
+            }
+            Dim dgv As New DataGridView With {
+                .Dock = DockStyle.Fill,
+                .BackgroundColor = CLR_CARD, .GridColor = CLR_BORDER,
+                .ForeColor = CLR_TEXT, .Font = New Font("Consolas", 11),
+                .AllowUserToAddRows = False, .AllowUserToDeleteRows = False,
+                .SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                .RowHeadersVisible = False, .AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                .DefaultCellStyle = New DataGridViewCellStyle With {
+                    .BackColor = CLR_CARD, .ForeColor = CLR_TEXT,
+                    .SelectionBackColor = Color.FromArgb(40, 80, 140),
+                    .SelectionForeColor = Color.White
+                },
+                .ColumnHeadersDefaultCellStyle = New DataGridViewCellStyle With {
+                    .BackColor = CLR_PANEL, .ForeColor = CLR_ACCENT,
+                    .Font = New Font("Segoe UI Semibold", 10)
+                },
+                .EnableHeadersVisualStyles = False
+            }
+            Dim colBarcode As New DataGridViewTextBoxColumn With {.Name = "Barcode", .HeaderText = "BARCODE", .FillWeight = 60}
+            Dim colProgram As New DataGridViewComboBoxColumn With {
+                .Name = "Program", .HeaderText = "PROGRAM", .FillWeight = 40, .FlatStyle = FlatStyle.Flat
+            }
+            For i = 1 To 15 : colProgram.Items.Add($"Program {i:D2}") : Next
+            dgv.Columns.AddRange({colBarcode, colProgram})
+            For Each kvp In config.BarcodeProgramMap
+                Dim rowIdx = dgv.Rows.Add()
+                dgv.Rows(rowIdx).Cells("Barcode").Value = kvp.Key
+                If kvp.Value >= 1 AndAlso kvp.Value <= 15 Then dgv.Rows(rowIdx).Cells("Program").Value = $"Program {kvp.Value:D2}"
+            Next
+            Dim pnlBtns As New FlowLayoutPanel With {
+                .Dock = DockStyle.Bottom, .Height = 50, .Padding = New Padding(8, 8, 8, 4),
+                .FlowDirection = FlowDirection.LeftToRight, .BackColor = CLR_PANEL
+            }
+            Dim btnAdd As New Button With {
+                .Text = "➕ ADD", .Width = 120, .Height = 36, .BackColor = CLR_PASS, .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 10)
+            }
+            btnAdd.FlatAppearance.BorderSize = 0
+            AddHandler btnAdd.Click, Sub()
+                Dim rowIdx = dgv.Rows.Add()
+                dgv.Rows(rowIdx).Cells("Program").Value = "Program 01"
+                dgv.CurrentCell = dgv.Rows(rowIdx).Cells("Barcode")
+                dgv.BeginEdit(True)
+            End Sub
+            Dim btnDel As New Button With {
+                .Text = "🗑 DELETE", .Width = 120, .Height = 36, .BackColor = CLR_DANGER, .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 10)
+            }
+            btnDel.FlatAppearance.BorderSize = 0
+            AddHandler btnDel.Click, Sub()
+                If dgv.SelectedRows.Count > 0 Then
+                    For Each row As DataGridViewRow In dgv.SelectedRows
+                        If Not row.IsNewRow Then dgv.Rows.Remove(row)
+                    Next
+                End If
+            End Sub
+            Dim btnSaveMap As New Button With {
+                .Text = "💾 SAVE", .Width = 240, .Height = 36, .BackColor = CLR_ACCENT, .ForeColor = Color.White,
+                .FlatStyle = FlatStyle.Flat, .Font = New Font("Segoe UI Semibold", 10)
+            }
+            btnSaveMap.FlatAppearance.BorderSize = 0
+            AddHandler btnSaveMap.Click, Sub()
+                config.BarcodeProgramMap.Clear()
+                For Each row As DataGridViewRow In dgv.Rows
+                    Dim bc = If(row.Cells("Barcode").Value?.ToString().Trim(), "")
+                    Dim pg = If(row.Cells("Program").Value?.ToString(), "")
+                    If Not String.IsNullOrEmpty(bc) AndAlso Not String.IsNullOrEmpty(pg) Then
+                        Dim pn As Integer
+                        If Integer.TryParse(pg.Replace("Program ", "").Trim(), pn) Then config.BarcodeProgramMap(bc) = pn
+                    End If
+                Next
+                SaveSettings()
+                Log("CONFIG", $"Saved {config.BarcodeProgramMap.Count} barcode→program mappings")
+                MessageBox.Show($"Saved {config.BarcodeProgramMap.Count} barcode→program mapping(s).", "Barcode Mapping", MessageBoxButtons.OK, MessageBoxIcon.Information)
+            End Sub
+            pnlBtns.Controls.AddRange({btnAdd, btnDel, btnSaveMap})
+            dlg.Controls.Add(dgv)
+            dlg.Controls.Add(pnlBtns)
+            dlg.Controls.Add(lblDesc)
+            dlg.Controls.Add(lblTitle)
+            dlg.ShowDialog(Me)
+        End Using
+    End Sub
+
     Private Function AddConfigField(p As FlowLayoutPanel, label As String, value As String) As TextBox
         p.Controls.Add(New Label With {.Text = label, .Width = 380, .ForeColor = CLR_DIM, .Font = New Font("Segoe UI", 9), .Margin = New Padding(0, 0, 0, 2)})
         Dim t As New TextBox With {
@@ -1720,6 +1762,12 @@ Partial Class Form1
             For i = 0 To config.ProgramNames.Length - 1
                 lines.Add($"Program{(i + 1):D2}={config.ProgramNames(i)}")
             Next
+            ' Barcode → Program mappings
+            lines.Add("")
+            lines.Add("[BarcodePrograms]")
+            For Each kvp In config.BarcodeProgramMap
+                lines.Add($"BarcodeMap={kvp.Key}={kvp.Value}")
+            Next
             IO.File.WriteAllLines(configPath, lines, Encoding.UTF8)
         Catch ex As Exception
             DebugLog($"CONFIG-SAVE-ERR: {ex.Message}")
@@ -1759,6 +1807,15 @@ Partial Class Form1
                             Dim idx As Integer
                             If Integer.TryParse(key.Substring(7), idx) AndAlso idx >= 1 AndAlso idx <= config.ProgramNames.Length Then
                                 config.ProgramNames(idx - 1) = val
+                            End If
+                        End If
+                        ' Handle BarcodeMap=barcode=programNum
+                        If key = "BarcodeMap" Then
+                            Dim eqPos = val.IndexOf("="c)
+                            If eqPos > 0 Then
+                                Dim bc = val.Substring(0, eqPos).Trim()
+                                Dim pn As Integer
+                                If Integer.TryParse(val.Substring(eqPos + 1).Trim(), pn) Then config.BarcodeProgramMap(bc) = pn
                             End If
                         End If
                 End Select
