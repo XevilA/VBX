@@ -110,6 +110,8 @@ Partial Class Form1
     Private isEStopActive As Boolean = False
     Private isPaused As Boolean = False
     Private scanRetryCount As Integer = 0
+    Private curtainBlockedTime As DateTime = DateTime.MinValue  ' Debounce for light curtain
+    Private curtainClearTime As DateTime = DateTime.MinValue
     Private clampStartTime As DateTime = DateTime.Now
     Private isSoftwareStartRequested As Boolean = False
     Private isSoftwareResetRequested As Boolean = False
@@ -375,40 +377,56 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) → Q0.4 + Q0.6 + immediate write ++
+                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) + debounce 500ms ++
                 If inputs(DI_CURTAIN) Then
-                    If Not outputs(DO_ROBOT_PAUSE) Then
-                        alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON) — Press START to override"
-                        Log("SAFETY", alarmMessage)
-                        outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
-                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
-                        ' CRITICAL: Immediate write to stop robot NOW
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
-                    End If
-                    outputs(DO_LIGHT_YEL) = False
-                    outputs(DO_LIGHT_RED) = True  ' Red solid = emergency
+                    curtainClearTime = DateTime.MinValue  ' Reset clear timer
+                    If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     
-                    ' ++ กด START ขณะ pause → override resume (ยังไม่คลาย clamp) ++
-                    If triggerStart Then
-                        Log("SAFETY", "✓ Operator override — Resuming robot (clamp locked)")
-                        outputs(DO_ROBOT_ESTOP) = False
-                        outputs(DO_ROBOT_PAUSE) = False
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
-                        alarmMessage = ""
+                    ' Debounce: ต้องบังต่อเนื่อง 500ms ถึง trigger
+                    If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 500 Then
+                        If Not outputs(DO_ROBOT_PAUSE) Then
+                            alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON) — Press START to override"
+                            Log("SAFETY", alarmMessage)
+                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
+                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                        End If
+                        outputs(DO_LIGHT_YEL) = False
+                        outputs(DO_LIGHT_RED) = True  ' Red solid = emergency
+                        
+                        ' ++ กด START ขณะ pause → override resume ++
+                        If triggerStart Then
+                            Log("SAFETY", "✓ Operator override — Resuming robot (clamp locked)")
+                            outputs(DO_ROBOT_ESTOP) = False
+                            outputs(DO_ROBOT_PAUSE) = False
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                            alarmMessage = ""
+                            curtainBlockedTime = DateTime.MinValue
+                        Else
+                            Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                        End If
                     Else
-                        Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                        Return  ' ยังไม่ถึง debounce 500ms
                     End If
-                End If
-                ' ม่านแสงเคลียร์แล้ว — auto resume
-                If outputs(DO_ROBOT_PAUSE) Then
-                    outputs(DO_ROBOT_ESTOP) = False   ' Q0.4 off
-                    outputs(DO_ROBOT_PAUSE) = False    ' Q0.6 off
-                    Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                    Catch : End Try
-                    alarmMessage = ""
-                    Log("SAFETY", "✓ Light Curtain Restored — Resuming (Q0.4=OFF Q0.6=OFF)")
+                Else
+                    curtainBlockedTime = DateTime.MinValue  ' Reset blocked timer
+                    ' ม่านแสงเคลียร์แล้ว — debounce 500ms ก่อน resume
+                    If outputs(DO_ROBOT_PAUSE) Then
+                        If curtainClearTime = DateTime.MinValue Then curtainClearTime = DateTime.Now
+                        If (DateTime.Now - curtainClearTime).TotalMilliseconds >= 500 Then
+                            outputs(DO_ROBOT_ESTOP) = False   ' Q0.4 off
+                            outputs(DO_ROBOT_PAUSE) = False    ' Q0.6 off
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                            alarmMessage = ""
+                            curtainClearTime = DateTime.MinValue
+                            Log("SAFETY", "✓ Light Curtain Clear 500ms — Resuming (Q0.4=OFF Q0.6=OFF)")
+                        Else
+                            Return  ' รอ clear debounce
+                        End If
+                    End If
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
@@ -735,91 +753,79 @@ Partial Class Form1
             ElseIf source.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) Then
                 bmp = Await Task.Run(Function() FetchImageFromTcp(source))
             ElseIf source.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
-                ' === Cognex In-Sight 2800 Official API ===
-                ' Step 1: POST /cam0/img/listIds → get image ID
-                ' Step 2: GET /cam0/img/{id} → get JPEG
+                ' === Cognex In-Sight 2800 — Try LIVE snapshot first, then stored image API ===
                 Dim baseUrl = $"http://{config.CognexIP}"
-                Dim cognexOK = False
-
-                Try
-                    ' Step 1: Get image IDs
-                    Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
-                    listReq.Method = "POST"
-                    listReq.ContentType = "application/json"
-                    listReq.ContentLength = 0
-                    listReq.Timeout = 2000
-                    listReq.Headers.Add("Cache-Control", "no-cache")
-                    Dim imgId As String = ""
-                    Using listResp = Await Task.Run(Function() listReq.GetResponse())
-                        Using sr As New IO.StreamReader(listResp.GetResponseStream())
-                            Dim body = sr.ReadToEnd().Trim()
-                            DebugLog($"CAM-COGNEX: listIds response: {body}")
-                            ' Parse first number from response (e.g. "[1166,1167]" → "1166")
-                            Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
-                            If nums.Length > 0 Then imgId = nums(0).Trim()
-                        End Using
-                    End Using
-
-                    If Not String.IsNullOrEmpty(imgId) Then
-                        ' Step 2: Fetch image by ID
-                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}?_t={DateTime.Now.Ticks}"), System.Net.HttpWebRequest)
-                        imgReq.Method = "GET"
-                        imgReq.Timeout = 2000
-                        imgReq.Headers.Add("Cache-Control", "no-cache")
-                        Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
-                            Using imgStream = imgResp.GetResponseStream()
+                Dim gotImage = False
+                
+                ' 1. Try LIVE snapshot endpoints (returns fresh frame every call = REALTIME)
+                Dim liveUrls = {
+                    $"{baseUrl}/CgiSnapshot?_t={DateTime.Now.Ticks}",
+                    $"{baseUrl}/img/snapshot.jpg?_t={DateTime.Now.Ticks}",
+                    $"{baseUrl}/CgiImage?img=snapshot.bmp&_t={DateTime.Now.Ticks}",
+                    $"{baseUrl}/snapshot.jpg?_t={DateTime.Now.Ticks}",
+                    $"{baseUrl}/image.jpg?_t={DateTime.Now.Ticks}"
+                }
+                For Each url In liveUrls
+                    If gotImage Then Exit For
+                    Try
+                        Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
+                        req.Method = "GET"
+                        req.Timeout = 1500
+                        req.Headers.Add("Cache-Control", "no-cache, no-store")
+                        req.Headers.Add("Pragma", "no-cache")
+                        Using resp = Await Task.Run(Function() req.GetResponse())
+                            Using respStream = resp.GetResponseStream()
                                 Using ms As New IO.MemoryStream()
-                                    imgStream.CopyTo(ms)
-                                    ms.Position = 0
-                                    bmp = New Bitmap(ms)
-                                    cognexOK = True
-                                    DebugLog($"CAM-COGNEX: Got image ID {imgId} ({ms.Length} bytes)")
+                                    respStream.CopyTo(ms)
+                                    If ms.Length > 100 Then
+                                        ms.Position = 0
+                                        bmp = New Bitmap(ms)
+                                        gotImage = True
+                                        DebugLog($"CAM-LIVE: OK from {url.Split("?"c)(0)} ({ms.Length} bytes)")
+                                    End If
                                 End Using
                             End Using
                         End Using
-                    End If
-                Catch cognexEx As Exception
-                    DebugLog($"CAM-COGNEX: API failed — {cognexEx.Message}")
-                End Try
-
-                ' Fallback: try legacy URLs if Cognex 2800 API didn't work
-                If Not cognexOK Then
-                    Dim fallbackUrls = {
-                        source,
-                        $"{baseUrl}/img/snapshot.jpg",
-                        $"{baseUrl}/CgiSnapshot",
-                        $"{baseUrl}/CgiImage?img=snapshot.bmp",
-                        $"{baseUrl}/snapshot.jpg",
-                        $"{baseUrl}/image.jpg"
-                    }
-                    For Each url In fallbackUrls
-                        Try
-                            Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
-                            req.Method = "GET"
-                            req.Timeout = 2000
-                            req.UserAgent = "VBX/3.0"
-                            req.Headers.Add("Cache-Control", "no-cache")
-                            Using resp = Await Task.Run(Function() req.GetResponse())
-                                Using respStream = resp.GetResponseStream()
+                    Catch : End Try
+                Next
+                
+                ' 2. Fallback: Cognex listIds API (stored inspection images, NOT realtime)
+                If Not gotImage Then
+                    Try
+                        Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
+                        listReq.Method = "POST"
+                        listReq.ContentType = "application/json"
+                        listReq.ContentLength = 0
+                        listReq.Timeout = 2000
+                        listReq.Headers.Add("Cache-Control", "no-cache")
+                        Dim imgId As String = ""
+                        Using listResp = Await Task.Run(Function() listReq.GetResponse())
+                            Using sr As New IO.StreamReader(listResp.GetResponseStream())
+                                Dim body = sr.ReadToEnd().Trim()
+                                Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
+                                If nums.Length > 0 Then imgId = nums(nums.Length - 1).Trim() ' latest ID
+                            End Using
+                        End Using
+                        If Not String.IsNullOrEmpty(imgId) Then
+                            Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}?_t={DateTime.Now.Ticks}"), System.Net.HttpWebRequest)
+                            imgReq.Method = "GET"
+                            imgReq.Timeout = 2000
+                            imgReq.Headers.Add("Cache-Control", "no-cache")
+                            Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
+                                Using imgStream = imgResp.GetResponseStream()
                                     Using ms As New IO.MemoryStream()
-                                        respStream.CopyTo(ms)
-                                        If ms.Length > 100 Then
-                                            ms.Position = 0
-                                            bmp = New Bitmap(ms)
-                                            If url <> config.CameraUrl Then
-                                                config.CameraUrl = url : SaveSettings()
-                                                Log("CAMERA", $"Working URL found: {url}")
-                                            End If
-                                            DebugLog($"CAM-HTTP: OK from {url} ({ms.Length} bytes)")
-                                            Exit For
-                                        End If
+                                        imgStream.CopyTo(ms)
+                                        ms.Position = 0
+                                        bmp = New Bitmap(ms)
+                                        gotImage = True
+                                        DebugLog($"CAM-COGNEX: Got image ID {imgId} ({ms.Length} bytes)")
                                     End Using
                                 End Using
                             End Using
-                        Catch urlEx As Exception
-                            DebugLog($"CAM-TRY: {url} -> {urlEx.Message}")
-                        End Try
-                    Next
+                        End If
+                    Catch cognexEx As Exception
+                        DebugLog($"CAM-COGNEX: API failed — {cognexEx.Message}")
+                    End Try
                 End If
             ElseIf IO.File.Exists(source) Then
                 bmp = Await Task.Run(Function()
