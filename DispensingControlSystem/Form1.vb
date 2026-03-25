@@ -459,12 +459,12 @@ Partial Class Form1
                     ' Debounce 100ms — กรอง noise แต่ยังเร็ว
                     If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 100 Then
-                        ' ★ PAUSE ทันที — หยุดเหมือน E-Stop
+                        ' ★ PAUSE เท่านั้น (ไม่ใช้ Q0.4 E-Stop เพราะ PLC จะตัดไฟ clamp!)
                         If Not outputs(DO_ROBOT_PAUSE) Then
                             alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
                             Log("SAFETY", alarmMessage)
-                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4
-                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6
+                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause เท่านั้น — clamp ยังจ่ายไฟอยู่
+                            ' ★ ไม่ส่ง Q0.4 E-Stop — จะทำให้ PLC ตัดไฟ clamp solenoids!
                             LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                             Catch : End Try
@@ -475,7 +475,6 @@ Partial Class Form1
                         ' กด START (I0.1+I0.2) ถึง resume
                         If triggerStart Then
                             Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
-                            outputs(DO_ROBOT_ESTOP) = False
                             outputs(DO_ROBOT_PAUSE) = False
                             LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
