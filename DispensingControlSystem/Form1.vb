@@ -117,6 +117,7 @@ Partial Class Form1
     Private clampStartTime As DateTime = DateTime.Now
     Private isSoftwareStartRequested As Boolean = False
     Private isSoftwareResetRequested As Boolean = False
+    Private robotHasStarted As Boolean = False  ' Track if the robot has actually started moving
     Private cycleDuration As Double = 0
     Private modbusClient As ModbusClient
     Private lastBarcode As String = "N/A"
@@ -402,6 +403,7 @@ Partial Class Form1
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
                 LockClamps(True)
+                robotHasStarted = False ' Reset run tracking flag
                 UpdateProgramBits() ' ส่งบิตโปรแกรมไปยัง PLC
                 
                 ' Force write program bits to hardware immediately
@@ -492,18 +494,21 @@ Partial Class Form1
                     End If
                 End If
 
-                ' รอรับสัญญาณเสร็จจากหุ่นยนต์ (ต้องรอ 2 วินาทีก่อนรับ DONE — กรอง stale I0.5)
+                ' รอรับสัญญาณเสร็จจากหุ่นยนต์ 
+                ' ต้องแน่ใจว่าหุ่นยนต์ได้ "เริ่มขยับ" (RUN) แล้วจริงๆ ค่อยเชื่อสัญญาณ DONE (กันกรณีสัญญาณ DONE ค้างจากรอบเก่า)
+                If inputs(DI_ROBOT_RUN) Then robotHasStarted = True
+                
                 Dim runSeconds = (DateTime.Now - clampStartTime).TotalSeconds
-                If runSeconds >= 2 Then
-                    If inputs(DI_ROBOT_DONE) Then         
-                        Log("ROBOT", $"✓ Dispensing Complete (ran {runSeconds:F1}s)")
-                        outputs(DO_LIGHT_YEL) = False
-                        currentState = MachineStatus.DISPENSE_DONE
-                    ElseIf inputs(DI_ROBOT_FAULT) Then    
-                        alarmMessage = "Robot Fault Signal (I0.6)"
-                        Log("FAULT", alarmMessage)
-                        currentState = MachineStatus.FAULT_ALARM
-                    End If
+                
+                ' ถ้าหุ่นยนต์เริ่มวิ่งแล้ว (หรือรอจนเกิน 10 วิเพื่อกันเหนียวเซนเซอร์รันเสีย) และตอนนี้มีตู้ DONE เข้ามา
+                If (robotHasStarted OrElse runSeconds > 10) AndAlso inputs(DI_ROBOT_DONE) AndAlso Not inputs(DI_ROBOT_RUN) Then         
+                    Log("ROBOT", $"✓ Dispensing Complete (ran {runSeconds:F1}s)")
+                    outputs(DO_LIGHT_YEL) = False
+                    currentState = MachineStatus.DISPENSE_DONE
+                ElseIf inputs(DI_ROBOT_FAULT) Then    
+                    alarmMessage = "Robot Fault Signal (I0.6)"
+                    Log("FAULT", alarmMessage)
+                    currentState = MachineStatus.FAULT_ALARM
                 End If
 
             ' ── 8. DISPENSE_DONE: หุ่นยนต์ถอย ──
