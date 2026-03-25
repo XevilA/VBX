@@ -285,7 +285,8 @@ Partial Class Form1
                     End If
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     
-                    ' +++ เปลี่ยนตรงนี้: ให้ไปรอคนกดปุ่ม Start อีกครั้ง +++
+                    ' รอ Operator กด Start ยืนยันก่อนรัน
+                    Log("SYSTEM", "▶ Press START to run dispensing program")
                     currentState = MachineStatus.WAIT_START_CONFIRM
                 Else
                     alarmMessage = $"Wrong Model! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
@@ -368,9 +369,9 @@ Partial Class Form1
                     Log("SAFETY", "Light Curtain Restored — Resuming (I0.3=OFF)")
                 End If
                 
-                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน ---
-                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 3 Then
-                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal)"
+                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน (8s timeout) ---
+                If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 8 Then
+                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal after 8s)"
                     Log("FAULT", alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
                     Return
@@ -1285,23 +1286,29 @@ Partial Class Form1
 
         Dim flp As New FlowLayoutPanel With {.Dock = DockStyle.Fill, .FlowDirection = FlowDirection.LeftToRight, .WrapContents = False}
 
-        ' DI label
-        flp.Controls.Add(New Label With {.Text = "DI", .ForeColor = CLR_ACCENT, .Font = New Font("Consolas", 9, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(0, 10, 4, 0)})
+        ' DI label + LEDs with pin labels
+        flp.Controls.Add(New Label With {.Text = "DI", .ForeColor = CLR_ACCENT, .Font = New Font("Consolas", 9, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(0, 6, 4, 0)})
+        Dim diNames = {"I0.0", "I0.1", "I0.2", "I0.3", "I0.4", "I0.5", "I0.6", "I0.7", "I1.0", "I1.1", "I1.2", "I1.3", "I1.4", "I1.5", "I1.6", "I1.7"}
         For i = 0 To 15
-            diLeds(i) = New Panel With {.Size = New Size(20, 20), .BackColor = Color.FromArgb(40, 40, 40), .Margin = New Padding(2, 8, 2, 0)}
+            Dim pnl As New Panel With {.Size = New Size(30, 36), .Margin = New Padding(1, 2, 1, 0)}
+            diLeds(i) = New Panel With {.Size = New Size(18, 18), .BackColor = Color.FromArgb(40, 40, 40), .Location = New Point(6, 0)}
             MakeCircle(diLeds(i))
-            Dim tt As New ToolTip()
-            tt.SetToolTip(diLeds(i), $"DI {i:D2}")
-            flp.Controls.Add(diLeds(i))
+            Dim lbl As New Label With {.Text = diNames(i), .ForeColor = CLR_DIM, .Font = New Font("Consolas", 6.5F), .Size = New Size(30, 14), .Location = New Point(0, 20), .TextAlign = ContentAlignment.TopCenter}
+            pnl.Controls.Add(diLeds(i))
+            pnl.Controls.Add(lbl)
+            flp.Controls.Add(pnl)
         Next
 
-        flp.Controls.Add(New Label With {.Text = "  DO", .ForeColor = CLR_WARN, .Font = New Font("Consolas", 9, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(12, 10, 4, 0)})
+        flp.Controls.Add(New Label With {.Text = "  DO", .ForeColor = CLR_WARN, .Font = New Font("Consolas", 9, FontStyle.Bold), .AutoSize = True, .Margin = New Padding(12, 6, 4, 0)})
+        Dim doNames = {"Q0.0", "Q0.1", "Q0.2", "Q0.3", "Q0.4", "Q0.5", "Q0.6", "Q0.7", "Q1.0", "Q1.1", "Q1.2", "Q1.3", "Q1.4", "Q1.5", "Q1.6", "Q1.7"}
         For i = 0 To 15
-            doLeds(i) = New Panel With {.Size = New Size(20, 20), .BackColor = Color.FromArgb(40, 40, 40), .Margin = New Padding(2, 8, 2, 0)}
+            Dim pnl As New Panel With {.Size = New Size(30, 36), .Margin = New Padding(1, 2, 1, 0)}
+            doLeds(i) = New Panel With {.Size = New Size(18, 18), .BackColor = Color.FromArgb(40, 40, 40), .Location = New Point(6, 0)}
             MakeCircle(doLeds(i))
-            Dim tt As New ToolTip()
-            tt.SetToolTip(doLeds(i), $"DO {i:D2}")
-            flp.Controls.Add(doLeds(i))
+            Dim lbl As New Label With {.Text = doNames(i), .ForeColor = CLR_DIM, .Font = New Font("Consolas", 6.5F), .Size = New Size(30, 14), .Location = New Point(0, 20), .TextAlign = ContentAlignment.TopCenter}
+            pnl.Controls.Add(doLeds(i))
+            pnl.Controls.Add(lbl)
+            flp.Controls.Add(pnl)
         Next
 
         pnlIOBar.Controls.Add(flp)
