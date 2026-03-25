@@ -215,21 +215,6 @@ Partial Class Form1
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-<<<<<<< HEAD
-            ' ── 2. CLAMP_EXTEND: รอเซนเซอร์ยืนยันการล็อค ──
-            Case MachineStatus.CLAMP_EXTEND
-                LockClamps(True) ' ค้างสถานะจ่าย 2,4
-                
-                ' เช็คว่าเซนเซอร์ล็อค (I1.2 และ I1.4) ติดครบ 2 ฝั่งหรือไม่
-                If inputs(DI_CYL_RET) AndAlso inputs(DI_CYL_RET2) Then
-                    Log("CLAMP", "✓ Locked — Sensors Confirmed (I1.2, I1.4)")
-                    currentState = MachineStatus.SCANNING
-                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    ' ถ้ารอเกิน 10 วินาทีแล้วเซนเซอร์ไม่ติด -> ตัดเป็น Error
-                    alarmMessage = "Clamp Lock TIMEOUT (Check Sensors I1.2, I1.4)"
-                    Log("CLAMP", "✗ " & alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-=======
             ' ── CLAMP_EXTEND: Keep clamp ON, wait BOTH extend sensors ──
             Case MachineStatus.CLAMP_EXTEND
                 ' MUST keep clamp Lock outputs ON every cycle
@@ -254,7 +239,6 @@ Partial Class Form1
                         ResetOutputs()
                         currentState = MachineStatus.IDLE
                     End If
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
                 End If
 
             ' ── 3. SCANNING: ยิงบาร์โค้ด (ทำงานเมื่อล็อคแน่นแล้วเท่านั้น) ──
@@ -316,7 +300,6 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-<<<<<<< HEAD
             ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
@@ -330,14 +313,6 @@ Partial Class Form1
                     alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
                     If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
                 End If
-=======
-            ' ── CURTAIN_CHECK: Log curtain status, always proceed ──
-            Case MachineStatus.CURTAIN_CHECK
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")}")
-                ' Always proceed — runtime safety during DISPENSE_RUNNING handles protection
-                currentState = MachineStatus.DISPENSE_START
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
