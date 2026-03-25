@@ -198,6 +198,17 @@ Partial Class Form1
             ' CRITICAL: Immediate write to STOP robot NOW
             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
             Catch : End Try
+            
+            ' E-Stop ปล่อย (I0.0 กลับ ON) + กด START → กลับ Home (IDLE)
+            If inputs(DI_ESTOP) AndAlso triggerStart Then
+                outputs(DO_ROBOT_ESTOP) = False
+                outputs(DO_ROBOT_PAUSE) = False
+                ResetOutputs()
+                isEStopActive = False
+                alarmMessage = ""
+                currentState = MachineStatus.IDLE
+                Log("SYSTEM", "✓ E-Stop released + START pressed — Returning to Home")
+            End If
             Return
         End If
 
@@ -382,41 +393,30 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ ม่านแสง NC: I0.3 ON = ปลอดภัย, I0.3 OFF = มีคนเข้า → Pause + debounce 500ms ++
+                ' ++ ม่านแสง NC: I0.3 OFF = มีคนเข้า → Pause ทันที (ไม่มี delay) ++
                 If Not inputs(DI_CURTAIN) Then
-                    curtainClearTime = DateTime.MinValue  ' Reset clear timer
-                    If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
-                    
-                    ' Debounce: ต้อง OFF ต่อเนื่อง 500ms ถึง trigger
-                    If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 500 Then
-                        If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
-                            Log("SAFETY", alarmMessage)
-                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
-                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
-                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                            Catch : End Try
-                        End If
-                        outputs(DO_LIGHT_YEL) = False
-                        outputs(DO_LIGHT_RED) = True  ' Red solid
-                        
-                        ' กด START ถึง resume ได้ (ไม่ auto-resume)
-                        If triggerStart Then
-                            Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
-                            outputs(DO_ROBOT_ESTOP) = False
-                            outputs(DO_ROBOT_PAUSE) = False
-                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                            Catch : End Try
-                            alarmMessage = ""
-                            curtainBlockedTime = DateTime.MinValue
-                        Else
-                            Return  ' รอกด START
-                        End If
-                    Else
-                        Return  ' รอ debounce 500ms
+                    If Not outputs(DO_ROBOT_PAUSE) Then
+                        alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
+                        Log("SAFETY", alarmMessage)
+                        outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
+                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
                     End If
-                Else
-                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = safe
+                    outputs(DO_LIGHT_YEL) = False
+                    outputs(DO_LIGHT_RED) = True  ' Red solid
+                    
+                    ' กด START ถึง resume (ไม่ auto-resume)
+                    If triggerStart Then
+                        Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
+                        outputs(DO_ROBOT_ESTOP) = False
+                        outputs(DO_ROBOT_PAUSE) = False
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
+                        alarmMessage = ""
+                    Else
+                        Return  ' รอกด START
+                    End If
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
