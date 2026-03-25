@@ -375,22 +375,25 @@ Partial Class Form1
                 outputs(DO_PROG_LOAD) = True
                 Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                 Catch : End Try
-                Await Task.Delay(300)
+                Await Task.Delay(200)
                 
                 ' LOAD OFF
                 outputs(DO_PROG_LOAD) = False
+                LockClamps(True)  ' บังคับ clamp ก่อน write
                 Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                 Catch : End Try
-                Await Task.Delay(200)
+                Await Task.Delay(100)
                 
                 ' ยิง Pulse START (Q0.5) — ON
                 outputs(DO_ROBOT_START) = True
+                LockClamps(True)  ' บังคับ clamp ก่อน write
                 Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                 Catch : End Try
                 Await Task.Delay(500)
                 
                 ' START OFF
                 outputs(DO_ROBOT_START) = False
+                LockClamps(True)  ' บังคับ clamp ก่อน write
                 Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                 Catch : End Try
                 
@@ -746,6 +749,8 @@ Partial Class Form1
                 Dim di = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
                 For i = 0 To 15 : inputs(i) = di(i) : Next
                 If Not isPaused Then Await RunWorkflowAsync()
+                ' บังคับ clamp ก่อน write ทุกครั้ง (ถ้าไม่ใช่ IDLE)
+                If currentState <> MachineStatus.IDLE Then LockClamps(True)
                 Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
             End If
 
