@@ -215,7 +215,6 @@ Partial Class Form1
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-<<<<<<< HEAD
             ' ── 2. CLAMP_EXTEND: รอเซนเซอร์ยืนยันการล็อค ──
             Case MachineStatus.CLAMP_EXTEND
                 LockClamps(True) ' ค้างสถานะจ่าย 2,4
@@ -229,32 +228,6 @@ Partial Class Form1
                     alarmMessage = "Clamp Lock TIMEOUT (Check Sensors I1.2, I1.4)"
                     Log("CLAMP", "✗ " & alarmMessage)
                     currentState = MachineStatus.FAULT_ALARM
-=======
-            ' ── CLAMP_EXTEND: Keep clamp ON, wait BOTH extend sensors ──
-            Case MachineStatus.CLAMP_EXTEND
-                ' MUST keep clamp Lock outputs ON every cycle
-                outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
-                outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
-                outputs(DO_LIGHT_GRN) = False
-                outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
-
-                ' Require BOTH extend sensors (AND logic)
-                Dim bothExtended = inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2)
-                If bothExtended Then
-                    LogClampIO("✓ BOTH Extended — I1.1+I1.3=ON")
-                    currentState = MachineStatus.SCANNING
-                ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    LogClampIO($"⚠ Timeout 10s — I1.1={inputs(DI_CYL_EXT)} I1.3={inputs(DI_CYL_EXT2)}")
-                    If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                        Log("CLAMP", "⚠ Partial extend — proceeding with 1 sensor")
-                        currentState = MachineStatus.SCANNING
-                    Else
-                        Log("CLAMP", "✗ Clamp FAILED — no sensors. Returning to IDLE")
-                        alarmMessage = "Clamp extend failed — no sensor signal"
-                        ResetOutputs()
-                        currentState = MachineStatus.IDLE
-                    End If
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
                 End If
 
             ' ── 3. SCANNING: ยิงบาร์โค้ด (ทำงานเมื่อล็อคแน่นแล้วเท่านั้น) ──
