@@ -114,6 +114,8 @@ Partial Class Form1
     Private previousStartState As Boolean = False   ' Edge detection for START button
     Private curtainBlockedTime As DateTime = DateTime.MinValue  ' Debounce for light curtain
     Private curtainClearTime As DateTime = DateTime.MinValue
+    Private previousCurtainState As Boolean = True  ' Track I0.3 transitions (True=ON=normal)
+    Private curtainOffCount As Integer = 0  ' Count how many times I0.3 went OFF during this cycle
     Private clampStartTime As DateTime = DateTime.Now
     Private isSoftwareStartRequested As Boolean = False
     Private isSoftwareResetRequested As Boolean = False
@@ -396,11 +398,24 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── 5. CURTAIN_CHECK: แค่ log สถานะม่าน → ไปต่อเลย (safety จริงอยู่ที่ DISPENSE_RUNNING) ──
+            ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนเริ่ม robot — ถ้า OFF ให้รอ ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
-                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")} — Proceeding")
-                currentState = MachineStatus.DISPENSE_START
+                curtainOffCount = 0  ' Reset counter for this cycle
+                If inputs(DI_CURTAIN) Then
+                    Log("SAFETY", "Light Curtain I0.3=ON — Clear to proceed")
+                    currentState = MachineStatus.DISPENSE_START
+                Else
+                    ' ม่านแสงถูกบังก่อนเริ่ม — รอให้คนออกก่อน
+                    alarmMessage = "⚠ Light Curtain BLOCKED — Clear area then press START"
+                    Log("SAFETY", "Light Curtain I0.3=OFF before start — waiting for area clear")
+                    outputs(DO_LIGHT_RED) = True
+                    If triggerStart AndAlso inputs(DI_CURTAIN) Then
+                        alarmMessage = ""
+                        Log("SAFETY", "✓ Curtain clear + START — proceeding")
+                        currentState = MachineStatus.DISPENSE_START
+                    End If
+                End If
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
@@ -453,18 +468,30 @@ Partial Class Form1
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบเท่านั้น
                 
                 ' ++ ม่านแสง: I0.3 ON = ปกติ, I0.3 OFF = มีคนเข้า → Pause ++
-                ' ★ ข้ามเช็ค 1 วินาทีแรก — ให้ robot เริ่มวิ่งก่อน (กัน noise ตอน startup)
+                ' ★ ข้ามเช็ค 2 วินาทีแรก — ให้ robot เริ่มวิ่งก่อน (กัน noise ตอน startup)
                 Dim runElapsed = (DateTime.Now - clampStartTime).TotalSeconds
-                If runElapsed >= 1.0 AndAlso Not inputs(DI_CURTAIN) Then
-                    ' Debounce 100ms — กรอง noise แต่ยังเร็ว
-                    If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
-                    If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 100 Then
-                        ' ★ PAUSE เท่านั้น (ไม่ใช้ Q0.4 E-Stop เพราะ PLC จะตัดไฟ clamp!)
+                
+                ' ★ Advanced Debug: ตรวจจับทุก transition ของ I0.3
+                Dim curtainNow = inputs(DI_CURTAIN)
+                If curtainNow <> previousCurtainState Then
+                    curtainOffCount += If(Not curtainNow, 1, 0)
+                    Log("CURTAIN-DBG", $"I0.3 {If(previousCurtainState, "ON", "OFF")}→{If(curtainNow, "ON", "OFF")} at {runElapsed:F2}s (OFF count={curtainOffCount})")
+                    previousCurtainState = curtainNow
+                End If
+                
+                If runElapsed >= 2.0 AndAlso Not curtainNow Then
+                    ' Debounce 500ms — กรอง noise จาก robot vibration (ปกติ 200-400ms)
+                    If curtainBlockedTime = DateTime.MinValue Then
+                        curtainBlockedTime = DateTime.Now
+                        Log("CURTAIN-DBG", $"Debounce START at {runElapsed:F2}s")
+                    End If
+                    Dim offMs = (DateTime.Now - curtainBlockedTime).TotalMilliseconds
+                    If offMs >= 500 Then
+                        ' ★ I0.3 OFF ต่อเนื่อง 500ms = คนเข้าจริง → PAUSE
                         If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
-                            Log("SAFETY", alarmMessage)
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF {offMs:F0}ms) — Press START to resume"
+                            Log("SAFETY", $"⚠ CURTAIN PAUSE — I0.3 OFF for {offMs:F0}ms at {runElapsed:F2}s (total OFF events={curtainOffCount})")
                             outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause เท่านั้น — clamp ยังจ่ายไฟอยู่
-                            ' ★ ไม่ส่ง Q0.4 E-Stop — จะทำให้ PLC ตัดไฟ clamp solenoids!
                             LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                             Catch : End Try
@@ -474,7 +501,7 @@ Partial Class Form1
                         
                         ' กด START (I0.1+I0.2) ถึง resume
                         If triggerStart Then
-                            Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
+                            Log("SAFETY", $"✓ Operator resumed — curtain was OFF {offMs:F0}ms (OFF events={curtainOffCount})")
                             outputs(DO_ROBOT_PAUSE) = False
                             LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
@@ -486,7 +513,12 @@ Partial Class Form1
                         End If
                     End If
                 Else
-                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = ปกติ หรือ ยังไม่ถึง 1s
+                    ' I0.3 ON = ปกติ หรือ ยังไม่ถึง 2s startup
+                    If curtainBlockedTime <> DateTime.MinValue Then
+                        Dim wasOffMs = (DateTime.Now - curtainBlockedTime).TotalMilliseconds
+                        Log("CURTAIN-DBG", $"I0.3 back ON after {wasOffMs:F0}ms — noise filtered (< 500ms threshold)")
+                    End If
+                    curtainBlockedTime = DateTime.MinValue
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
