@@ -109,7 +109,9 @@ Partial Class Form1
     Private outputs(15) As Boolean
     Private isEStopActive As Boolean = False
     Private isPaused As Boolean = False
+    Private clampShouldBeLocked As Boolean = False  ' Master flag — clamp lock intent
     Private scanRetryCount As Integer = 0
+    Private previousStartState As Boolean = False   ' Edge detection for START button
     Private curtainBlockedTime As DateTime = DateTime.MinValue  ' Debounce for light curtain
     Private curtainClearTime As DateTime = DateTime.MinValue
     Private clampStartTime As DateTime = DateTime.Now
@@ -164,7 +166,10 @@ Partial Class Form1
 #Region "Core Machine Logic — Production Flow & Double Acting Clamp"
     Private Async Function RunWorkflowAsync() As Task
         ' ── Safety: กดปุ่ม Start 2 มือพร้อมกัน หรือกดผ่าน HMI (F1) ──
-        Dim triggerStart = isSoftwareStartRequested OrElse (inputs(DI_START) AndAlso inputs(DI_START2))
+        ' ★ Rising Edge: triggerStart = True แค่ตอนกด (ไม่ใช่ตอนค้าง)
+        Dim currentStartState = isSoftwareStartRequested OrElse (inputs(DI_START) AndAlso inputs(DI_START2))
+        Dim triggerStart = currentStartState AndAlso Not previousStartState
+        previousStartState = currentStartState
         Dim triggerReset = isSoftwareResetRequested
         isSoftwareStartRequested = False
         isSoftwareResetRequested = False
@@ -184,6 +189,7 @@ Partial Class Form1
             alarmMessage = ""
             lastBarcode = ""
             ResetOutputs()
+            clampShouldBeLocked = False
             Log("SYSTEM", "Manual Reset Initiated")
             Return
         End If
@@ -199,15 +205,45 @@ Partial Class Form1
             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
             Catch : End Try
             
-            ' E-Stop ปล่อย (I0.0 กลับ ON) + กด START → กลับ Home (IDLE)
+            ' E-Stop ปล่อย (I0.0 กลับ ON) + กด START → สั่ง Robot กลับ Home (Set Zero)
             If inputs(DI_ESTOP) AndAlso triggerStart Then
-                outputs(DO_ROBOT_ESTOP) = False
-                outputs(DO_ROBOT_PAUSE) = False
+                Log("SYSTEM", "✓ E-Stop released + START pressed — Sending Robot Home (Set Zero)")
+                
+                ' 1. Reset all outputs
                 ResetOutputs()
+                clampShouldBeLocked = False
                 isEStopActive = False
+                isPaused = False
                 alarmMessage = ""
+                lastBarcode = ""
+                
+                ' 2. Load Program 0 (Home/Set Zero) → robot กลับตำแหน่งเริ่มต้น
+                outputs(DO_PROG_BIT0) = False  ' Q1.0 = 0
+                outputs(DO_PROG_BIT1) = False  ' Q1.1 = 0
+                outputs(DO_PROG_BIT2) = False  ' Q1.2 = 0
+                outputs(DO_PROG_BIT3) = False  ' Q1.3 = 0
+                outputs(DO_PROG_LOAD) = True   ' Q0.7 LOAD ON
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                Await Task.Delay(300)
+                
+                outputs(DO_PROG_LOAD) = False  ' LOAD OFF
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                Await Task.Delay(200)
+                
+                ' 3. Send START pulse → robot ทำ Program 0 (กลับ Home)
+                outputs(DO_ROBOT_START) = True ' Q0.5 START ON
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                Await Task.Delay(500)
+                
+                outputs(DO_ROBOT_START) = False ' START OFF
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                
+                Log("SYSTEM", "✓ Robot Home command sent — System ready (Set Zero)")
                 currentState = MachineStatus.IDLE
-                Log("SYSTEM", "✓ E-Stop released + START pressed — Returning to Home")
             End If
             Return
         End If
@@ -219,7 +255,8 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = True
                 
                 ' ++ จ่ายไฟ 1,3 ค้างไว้เพื่อรักษาแรงดันลมฝั่ง Unlock ++
-                LockClamps(False) 
+                LockClamps(False)
+                clampShouldBeLocked = False  ' ★ IDLE = unlock
 
                 If triggerStart Then
                     cycleStartTime = DateTime.Now
@@ -227,6 +264,7 @@ Partial Class Form1
                     
                     ' สั่ง Lock (ดับ 1,3 จ่าย 2,4)
                     LockClamps(True)
+                    clampShouldBeLocked = True  ' ★ Master flag ON
                     outputs(DO_LIGHT_GRN) = False
                     outputs(DO_LIGHT_YEL) = True
                     ' CRITICAL: Immediately write clamp outputs to hardware
@@ -530,6 +568,7 @@ Partial Class Form1
             ' ── 11. RETRACT: ถอยแคลมป์เพื่อปลดล็อคชิ้นงาน (จ่าย 1,3) ──
             Case MachineStatus.VISION_OK_RETRACT, MachineStatus.MODEL_FAIL_RETRACT, MachineStatus.VISION_NG_RETRACT
                 LockClamps(False) ' สั่ง Unlock (จ่าย 1,3 ดับ 2,4)
+                clampShouldBeLocked = False  ' ★ Allow unlock for RETRACT
                 
                 ' รอเซนเซอร์ปลดล็อคยืนยัน (I1.1 และ I1.3)
                 If inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2) Then
@@ -754,13 +793,8 @@ Partial Class Form1
                 Dim di = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
                 For i = 0 To 15 : inputs(i) = di(i) : Next
                 If Not isPaused Then Await RunWorkflowAsync()
-                ' บังคับ clamp ก่อน write (ยกเว้น IDLE, RETRACT, CYCLE_COMPLETE)
-                Select Case currentState
-                    Case MachineStatus.IDLE, MachineStatus.VISION_OK_RETRACT, MachineStatus.MODEL_FAIL_RETRACT, MachineStatus.VISION_NG_RETRACT, MachineStatus.CYCLE_COMPLETE
-                        ' ไม่บังคับ lock — ปล่อยให้ state machine จัดการ
-                    Case Else
-                        LockClamps(True)
-                End Select
+                ' ★ Absolute clamp enforcement — master flag overrides everything
+                If clampShouldBeLocked Then LockClamps(True)
                 Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
             End If
 
