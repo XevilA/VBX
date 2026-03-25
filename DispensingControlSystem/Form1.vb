@@ -262,7 +262,7 @@ Partial Class Form1
                         currentState = MachineStatus.MODEL_FAIL_RETRACT
                     Else
                         Log("SCAN", $"Read Failed — Retry {scanRetryCount}/3...")
-                        Await Task.Delay(500)
+                        Await Task.Delay(300)
                     End If
                 End If
 
@@ -275,12 +275,28 @@ Partial Class Form1
 
                 If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
                     Log("VERIFY", $"✓ Model Match: {lastBarcode} -> Waiting for Start Confirmation")
-                    ' Auto-select program from barcode mapping
+                    ' Auto-select program from barcode mapping (exact or prefix match)
+                    Dim matchedProg As Integer = -1
+                    Dim matchedKey As String = ""
+                    ' 1. Exact match
                     If config.BarcodeProgramMap.ContainsKey(lastBarcode) Then
-                        Dim progIdx = config.BarcodeProgramMap(lastBarcode) - 1
+                        matchedProg = config.BarcodeProgramMap(lastBarcode)
+                        matchedKey = lastBarcode
+                    Else
+                        ' 2. Prefix match (longest prefix wins)
+                        For Each kvp In config.BarcodeProgramMap.OrderByDescending(Function(k) k.Key.Length)
+                            If lastBarcode.StartsWith(kvp.Key, StringComparison.OrdinalIgnoreCase) Then
+                                matchedProg = kvp.Value
+                                matchedKey = kvp.Key
+                                Exit For
+                            End If
+                        Next
+                    End If
+                    If matchedProg > 0 Then
+                        Dim progIdx = matchedProg - 1
                         If progIdx >= 0 AndAlso progIdx < cbProgramSelect.Items.Count Then
                             cbProgramSelect.Invoke(Sub() cbProgramSelect.SelectedIndex = progIdx)
-                            Log("PROGRAM", $"Auto-selected Program {progIdx + 1} for barcode {lastBarcode}")
+                            Log("PROGRAM", $"Auto-selected Program {matchedProg} (matched '{matchedKey}') for barcode {lastBarcode}")
                         End If
                     End If
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
@@ -537,10 +553,10 @@ Partial Class Form1
         For Each cmdStr In commands
             Try
                 Using client As New TcpClient()
-                    client.ReceiveTimeout = 5000
-                    client.SendTimeout = 3000
+                    client.ReceiveTimeout = 2000
+                    client.SendTimeout = 1000
                     Dim connectTask = client.ConnectAsync(config.KeyenceIP, config.KeyencePort)
-                    If Await Task.WhenAny(connectTask, Task.Delay(3000)) IsNot connectTask Then
+                    If Await Task.WhenAny(connectTask, Task.Delay(1000)) IsNot connectTask Then
                         DebugLog("SCAN: Connection timeout")
                         Continue For
                     End If
@@ -553,12 +569,12 @@ Partial Class Form1
                         Dim cmd = Encoding.ASCII.GetBytes(cmdStr)
                         Await stream.WriteAsync(cmd, 0, cmd.Length)
 
-                        ' Wait for scanner to acquire barcode (critical for Keyence)
-                        Await Task.Delay(500)
+                        ' Wait for scanner to acquire barcode
+                        Await Task.Delay(200)
                         Dim fullResponse As String = ""
                         Dim buffer(4096) As Byte
                         Dim totalWait = 0
-                        While totalWait < 3000
+                        While totalWait < 1500
                             If stream.DataAvailable Then
                                 Dim bytesRead = Await stream.ReadAsync(buffer, 0, buffer.Length)
                                 If bytesRead > 0 Then
@@ -567,8 +583,8 @@ Partial Class Form1
                                     If fullResponse.Length > 3 Then Exit While
                                 End If
                             Else
-                                Await Task.Delay(200)
-                                totalWait += 200
+                                Await Task.Delay(100)
+                                totalWait += 100
                             End If
                         End While
 
