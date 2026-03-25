@@ -813,6 +813,11 @@ Partial Class Form1
     ''' </summary>
     Private Async Sub UpdateCameraFrameAsync(sender As Object, e As EventArgs)
         If picCameraPreview Is Nothing OrElse isPaused Then Return
+        ' ★ Skip camera during robot-critical states — HTTP requests block Modbus writes
+        Select Case currentState
+            Case MachineStatus.CLAMP_EXTEND, MachineStatus.DISPENSE_START, MachineStatus.DISPENSE_RUNNING, MachineStatus.CURTAIN_CHECK
+                Return ' Modbus timing is critical here — don't block with HTTP
+        End Select
         Try
             Dim bmp As Bitmap = Nothing
             Dim source = If(Not String.IsNullOrWhiteSpace(config.CameraSourcePath), config.CameraSourcePath, config.CameraUrl)
@@ -826,22 +831,7 @@ Partial Class Form1
                 Dim baseUrl = $"http://{config.CognexIP}"
                 Dim gotImage = False
                 
-                ' 1. Trigger new acquisition via TCP Native Mode (SE8 = Software Trigger)
-                '    This makes the camera capture a NEW image so listIds returns fresh data
-                Try
-                    Using trigClient As New System.Net.Sockets.TcpClient()
-                        trigClient.ReceiveTimeout = 500
-                        trigClient.SendTimeout = 500
-                        Await Task.Run(Sub() trigClient.Connect(config.CognexIP, 23))
-                        Using ns = trigClient.GetStream()
-                            Dim cmd = System.Text.Encoding.ASCII.GetBytes("SE8" & vbCr)
-                            Await ns.WriteAsync(cmd, 0, cmd.Length)
-                            Await Task.Delay(100) ' Give camera time to acquire
-                        End Using
-                    End Using
-                Catch : End Try ' Non-fatal — image may still be recent enough
-                
-                ' 2. Fetch image via listIds API (official Cognex 2800 method)
+                ' Fetch latest image via listIds API (NO trigger — just display what Cognex has)
                 Try
                     Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
                     listReq.Method = "POST"
