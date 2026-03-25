@@ -1,19 +1,31 @@
-name: 🔧 VBX Standalone Build & Release
+name: 🔧 VBX Build & Release
 
 on:
   push:
     branches: [ main, master ]
-    tags: [ 'v*' ]       # Push tag v1.0.0 → auto create Release
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:      # Manual trigger from GitHub UI
+
+  # ★ Collaborators can trigger release from GitHub UI
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.6.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release?'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: Build Windows x64 Standalone EXE
     runs-on: windows-latest
     permissions:
-      contents: write    # Required for creating releases
+      contents: write
 
     steps:
       - name: 📥 Checkout Repository
@@ -52,19 +64,30 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # === PUBLIC RELEASE (when pushing a tag like v1.0.0) ===
-      - name: 📦 Zip Release Package
-        if: startsWith(github.ref, 'refs/tags/v')
+      # === RELEASE: tag push OR manual workflow_dispatch ===
+      - name: 🏷 Determine Version
+        id: ver
+        shell: bash
         run: |
-          Compress-Archive -Path ./Output/Standalone/win-x64/* -DestinationPath ./VBX-DispensingControl-${{ github.ref_name }}-win-x64.zip
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "TAG=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📦 Zip Release Package
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        run: |
+          Compress-Archive -Path ./Output/Standalone/win-x64/* -DestinationPath ./VBX-DispensingControl-${{ steps.ver.outputs.TAG }}-win-x64.zip
 
       - name: 🚀 Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          name: "VBX Dispensing Control ${{ github.ref_name }}"
+          tag_name: ${{ steps.ver.outputs.TAG }}
+          name: "VBX Dispensing Control ${{ steps.ver.outputs.TAG }}"
           body: |
-            ## VBX Dispensing Control System — ${{ github.ref_name }}
+            ## VBX Dispensing Control System — ${{ steps.ver.outputs.TAG }}
 
             ### 📥 Download
             ดาวน์โหลดไฟล์ `.zip` ด้านล่าง → แตกไฟล์ → รัน `DispensingControlSystem.exe`
@@ -75,7 +98,7 @@ jobs:
 
             ### ⚠️ หมายเหตุ
             - ถ้า Windows SmartScreen ขึ้นเตือน → คลิก **More info** → **Run anyway**
-          files: ./VBX-DispensingControl-${{ github.ref_name }}-win-x64.zip
+          generate_release_notes: true
+          files: ./VBX-DispensingControl-${{ steps.ver.outputs.TAG }}-win-x64.zip
           draft: false
-          prerelease: false
-
+          prerelease: ${{ inputs.prerelease || false }}
