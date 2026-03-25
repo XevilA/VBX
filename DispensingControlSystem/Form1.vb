@@ -511,10 +511,11 @@ Partial Class Form1
                     currentState = MachineStatus.FAULT_ALARM
                 End If
 
-            ' ── 8. DISPENSE_DONE: หุ่นยนต์ถอย ──
             Case MachineStatus.DISPENSE_DONE
                 LockClamps(True)
-                outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2)
+                outputs(DO_LIGHT_YEL) = False          ' ★ Flowchart: yellow OFF after dispense
+                outputs(DO_LIGHT_RED) = False
+                outputs(DO_LIGHT_GRN) = (animPulse Mod 4 < 2) ' ★ Flowchart: green blink
                 
                 ' รอ 1.5 วิ ให้แขนหุ่นยนต์ถอยพ้นหน้ากล้อง
                 Await Task.Delay(1500)
@@ -634,6 +635,11 @@ Partial Class Form1
             outputs(DO_CLAMP3) = False   ' Q1.6 (Unlock 3) = OFF
             outputs(DO_CLAMP2) = True    ' Q1.5 (Lock 2)   = ON
             outputs(DO_CLAMP4) = True    ' Q1.7 (Lock 4)   = ON
+            ' ★ IMMEDIATE write — ส่ง lock ไป PLC ทันที ไม่รอ tick ถัดไป
+            If clampShouldBeLocked Then
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+            End If
         Else
             ' UNLOCK: จ่าย 1,3 | ดับ 2,4
             outputs(DO_CLAMP2) = False   ' Q1.5 (Lock 2)   = OFF
