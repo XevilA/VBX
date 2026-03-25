@@ -480,30 +480,27 @@ Partial Class Form1
                 End If
                 
                 If runElapsed >= 2.0 AndAlso Not curtainNow Then
-                    ' ★ INSTANT PAUSE — ไม่มี debounce, I0.3 OFF = หยุดทันที
-                    If Not outputs(DO_ROBOT_PAUSE) Then
+                    ' ★ LOGIC ONLY PAUSE — ไม่มี debounce, I0.3 OFF = หยุดทาง Software
+                    If alarmMessage = "" Then
                         alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
-                        Log("SAFETY", $"⚠ CURTAIN PAUSE — I0.3 OFF at {runElapsed:F2}s (OFF events={curtainOffCount})")
-                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause เท่านั้น
-                        LockClamps(True)
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
+                        Log("SAFETY", $"⚠ CURTAIN PAUSE (Logic Only) — I0.3 OFF at {runElapsed:F2}s")
                     End If
                     outputs(DO_LIGHT_YEL) = False
                     outputs(DO_LIGHT_RED) = True
+                    isPaused = True
                     
                     ' กด START (I0.1+I0.2) ถึง resume
                     If triggerStart Then
-                        Log("SAFETY", $"✓ Operator resumed (OFF events={curtainOffCount})")
-                        outputs(DO_ROBOT_PAUSE) = False
-                        LockClamps(True)
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
+                        Log("SAFETY", $"✓ Operator resumed (Logic Only)")
+                        isPaused = False
                         alarmMessage = ""
                     Else
-                        Return  ' รอกด START
+                        Return  ' รอกด START — ข้ามการเช็ค DONE ไปเลย
                     End If
                 End If
+                
+                ' ถ้าติด Pause ด้วย Logic อยู่ จะไม่เช็ค DONE (ข้ามไปเลยดื้อๆ)
+                If isPaused Then Return
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
                 If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 8 Then
