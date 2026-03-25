@@ -754,8 +754,13 @@ Partial Class Form1
                 Dim di = Await Task.Run(Function() modbusClient.ReadDiscreteInputs(0, 16))
                 For i = 0 To 15 : inputs(i) = di(i) : Next
                 If Not isPaused Then Await RunWorkflowAsync()
-                ' บังคับ clamp ก่อน write ทุกครั้ง (ถ้าไม่ใช่ IDLE)
-                If currentState <> MachineStatus.IDLE Then LockClamps(True)
+                ' บังคับ clamp ก่อน write (ยกเว้น IDLE, RETRACT, CYCLE_COMPLETE)
+                Select Case currentState
+                    Case MachineStatus.IDLE, MachineStatus.VISION_OK_RETRACT, MachineStatus.MODEL_FAIL_RETRACT, MachineStatus.VISION_NG_RETRACT, MachineStatus.CYCLE_COMPLETE
+                        ' ไม่บังคับ lock — ปล่อยให้ state machine จัดการ
+                    Case Else
+                        LockClamps(True)
+                End Select
                 Await Task.Run(Sub() modbusClient.WriteMultipleCoils(0, outputs))
             End If
 
@@ -783,80 +788,61 @@ Partial Class Form1
             ElseIf source.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase) Then
                 bmp = Await Task.Run(Function() FetchImageFromTcp(source))
             ElseIf source.StartsWith("http", StringComparison.OrdinalIgnoreCase) Then
-                ' === Cognex In-Sight 2800 — Try LIVE snapshot first, then stored image API ===
+                ' === Cognex In-Sight 2800 — Trigger new acquisition then fetch image ===
                 Dim baseUrl = $"http://{config.CognexIP}"
                 Dim gotImage = False
                 
-                ' 1. Try LIVE snapshot endpoints (returns fresh frame every call = REALTIME)
-                Dim liveUrls = {
-                    $"{baseUrl}/CgiSnapshot?_t={DateTime.Now.Ticks}",
-                    $"{baseUrl}/img/snapshot.jpg?_t={DateTime.Now.Ticks}",
-                    $"{baseUrl}/CgiImage?img=snapshot.bmp&_t={DateTime.Now.Ticks}",
-                    $"{baseUrl}/snapshot.jpg?_t={DateTime.Now.Ticks}",
-                    $"{baseUrl}/image.jpg?_t={DateTime.Now.Ticks}"
-                }
-                For Each url In liveUrls
-                    If gotImage Then Exit For
-                    Try
-                        Dim req = CType(System.Net.WebRequest.Create(url), System.Net.HttpWebRequest)
-                        req.Method = "GET"
-                        req.Timeout = 1500
-                        req.Headers.Add("Cache-Control", "no-cache, no-store")
-                        req.Headers.Add("Pragma", "no-cache")
-                        Using resp = Await Task.Run(Function() req.GetResponse())
-                            Using respStream = resp.GetResponseStream()
-                                Using ms As New IO.MemoryStream()
-                                    respStream.CopyTo(ms)
-                                    If ms.Length > 100 Then
-                                        ms.Position = 0
-                                        bmp = New Bitmap(ms)
-                                        gotImage = True
-                                        DebugLog($"CAM-LIVE: OK from {url.Split("?"c)(0)} ({ms.Length} bytes)")
-                                    End If
-                                End Using
-                            End Using
+                ' 1. Trigger new acquisition via TCP Native Mode (SE8 = Software Trigger)
+                '    This makes the camera capture a NEW image so listIds returns fresh data
+                Try
+                    Using trigClient As New System.Net.Sockets.TcpClient()
+                        trigClient.ReceiveTimeout = 500
+                        trigClient.SendTimeout = 500
+                        Await Task.Run(Sub() trigClient.Connect(config.CognexIP, 23))
+                        Using ns = trigClient.GetStream()
+                            Dim cmd = System.Text.Encoding.ASCII.GetBytes("SE8" & vbCr)
+                            Await ns.WriteAsync(cmd, 0, cmd.Length)
+                            Await Task.Delay(100) ' Give camera time to acquire
                         End Using
-                    Catch : End Try
-                Next
+                    End Using
+                Catch : End Try ' Non-fatal — image may still be recent enough
                 
-                ' 2. Fallback: Cognex listIds API (stored inspection images, NOT realtime)
-                If Not gotImage Then
-                    Try
-                        Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
-                        listReq.Method = "POST"
-                        listReq.ContentType = "application/json"
-                        listReq.ContentLength = 0
-                        listReq.Timeout = 2000
-                        listReq.Headers.Add("Cache-Control", "no-cache")
-                        Dim imgId As String = ""
-                        Using listResp = Await Task.Run(Function() listReq.GetResponse())
-                            Using sr As New IO.StreamReader(listResp.GetResponseStream())
-                                Dim body = sr.ReadToEnd().Trim()
-                                Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
-                                If nums.Length > 0 Then imgId = nums(nums.Length - 1).Trim() ' latest ID
-                            End Using
+                ' 2. Fetch image via listIds API (official Cognex 2800 method)
+                Try
+                    Dim listReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/listIds"), System.Net.HttpWebRequest)
+                    listReq.Method = "POST"
+                    listReq.ContentType = "application/json"
+                    listReq.ContentLength = 0
+                    listReq.Timeout = 2000
+                    listReq.Headers.Add("Cache-Control", "no-cache")
+                    Dim imgId As String = ""
+                    Using listResp = Await Task.Run(Function() listReq.GetResponse())
+                        Using sr As New IO.StreamReader(listResp.GetResponseStream())
+                            Dim body = sr.ReadToEnd().Trim()
+                            Dim nums = body.Replace("[", "").Replace("]", "").Split(","c)
+                            If nums.Length > 0 Then imgId = nums(0).Trim() ' FIRST ID = raw acquired image
                         End Using
-                        If Not String.IsNullOrEmpty(imgId) Then
-                            Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}?_t={DateTime.Now.Ticks}"), System.Net.HttpWebRequest)
-                            imgReq.Method = "GET"
-                            imgReq.Timeout = 2000
-                            imgReq.Headers.Add("Cache-Control", "no-cache")
-                            Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
-                                Using imgStream = imgResp.GetResponseStream()
-                                    Using ms As New IO.MemoryStream()
-                                        imgStream.CopyTo(ms)
-                                        ms.Position = 0
-                                        bmp = New Bitmap(ms)
-                                        gotImage = True
-                                        DebugLog($"CAM-COGNEX: Got image ID {imgId} ({ms.Length} bytes)")
-                                    End Using
+                    End Using
+                    If Not String.IsNullOrEmpty(imgId) Then
+                        Dim imgReq = CType(System.Net.WebRequest.Create($"{baseUrl}/cam0/img/{imgId}?_t={DateTime.Now.Ticks}"), System.Net.HttpWebRequest)
+                        imgReq.Method = "GET"
+                        imgReq.Timeout = 2000
+                        imgReq.Headers.Add("Cache-Control", "no-cache")
+                        Using imgResp = Await Task.Run(Function() imgReq.GetResponse())
+                            Using imgStream = imgResp.GetResponseStream()
+                                Using ms As New IO.MemoryStream()
+                                    imgStream.CopyTo(ms)
+                                    ms.Position = 0
+                                    bmp = New Bitmap(ms)
+                                    gotImage = True
+                                    DebugLog($"CAM-COGNEX: Image ID {imgId} ({ms.Length} bytes)")
                                 End Using
                             End Using
-                        End If
-                    Catch cognexEx As Exception
-                        DebugLog($"CAM-COGNEX: API failed — {cognexEx.Message}")
-                    End Try
-                End If
+                        End Using
+                    End If
+                Catch cognexEx As Exception
+                    DebugLog($"CAM-COGNEX: API failed — {cognexEx.Message}")
+                End Try
             ElseIf IO.File.Exists(source) Then
                 bmp = Await Task.Run(Function()
                     Using fs = New IO.FileStream(source, IO.FileMode.Open, IO.FileAccess.Read, IO.FileShare.ReadWrite)
