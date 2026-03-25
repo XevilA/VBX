@@ -375,10 +375,10 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) → Q0.4 Emergency + Q0.6 Pause + immediate write ++
+                ' ++ EMERGENCY: ม่านแสงถูกบัง (I0.3 = ON) → Q0.4 + Q0.6 + immediate write ++
                 If inputs(DI_CURTAIN) Then
                     If Not outputs(DO_ROBOT_PAUSE) Then
-                        alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON)"
+                        alarmMessage = "⚠ EMERGENCY: Light Curtain Interrupted (I0.3=ON) — Press START to override"
                         Log("SAFETY", alarmMessage)
                         outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
                         outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
@@ -388,13 +388,23 @@ Partial Class Form1
                     End If
                     outputs(DO_LIGHT_YEL) = False
                     outputs(DO_LIGHT_RED) = True  ' Red solid = emergency
-                    Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                    
+                    ' ++ กด START ขณะ pause → override resume (ยังไม่คลาย clamp) ++
+                    If triggerStart Then
+                        Log("SAFETY", "✓ Operator override — Resuming robot (clamp locked)")
+                        outputs(DO_ROBOT_ESTOP) = False
+                        outputs(DO_ROBOT_PAUSE) = False
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
+                        alarmMessage = ""
+                    Else
+                        Return  ' อยู่ใน DISPENSE_RUNNING ไม่ไปต่อ
+                    End If
                 End If
-                ' ม่านแสงเคลียร์แล้ว — resume
+                ' ม่านแสงเคลียร์แล้ว — auto resume
                 If outputs(DO_ROBOT_PAUSE) Then
                     outputs(DO_ROBOT_ESTOP) = False   ' Q0.4 off
                     outputs(DO_ROBOT_PAUSE) = False    ' Q0.6 off
-                    ' Immediate write to resume robot
                     Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                     Catch : End Try
                     alarmMessage = ""
