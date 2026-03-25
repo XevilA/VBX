@@ -480,45 +480,29 @@ Partial Class Form1
                 End If
                 
                 If runElapsed >= 2.0 AndAlso Not curtainNow Then
-                    ' Debounce 500ms — กรอง noise จาก robot vibration (ปกติ 200-400ms)
-                    If curtainBlockedTime = DateTime.MinValue Then
-                        curtainBlockedTime = DateTime.Now
-                        Log("CURTAIN-DBG", $"Debounce START at {runElapsed:F2}s")
+                    ' ★ INSTANT PAUSE — ไม่มี debounce, I0.3 OFF = หยุดทันที
+                    If Not outputs(DO_ROBOT_PAUSE) Then
+                        alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
+                        Log("SAFETY", $"⚠ CURTAIN PAUSE — I0.3 OFF at {runElapsed:F2}s (OFF events={curtainOffCount})")
+                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause เท่านั้น
+                        LockClamps(True)
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
                     End If
-                    Dim offMs = (DateTime.Now - curtainBlockedTime).TotalMilliseconds
-                    If offMs >= 500 Then
-                        ' ★ I0.3 OFF ต่อเนื่อง 500ms = คนเข้าจริง → PAUSE
-                        If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF {offMs:F0}ms) — Press START to resume"
-                            Log("SAFETY", $"⚠ CURTAIN PAUSE — I0.3 OFF for {offMs:F0}ms at {runElapsed:F2}s (total OFF events={curtainOffCount})")
-                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Pause เท่านั้น — clamp ยังจ่ายไฟอยู่
-                            LockClamps(True)
-                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                            Catch : End Try
-                        End If
-                        outputs(DO_LIGHT_YEL) = False
-                        outputs(DO_LIGHT_RED) = True
-                        
-                        ' กด START (I0.1+I0.2) ถึง resume
-                        If triggerStart Then
-                            Log("SAFETY", $"✓ Operator resumed — curtain was OFF {offMs:F0}ms (OFF events={curtainOffCount})")
-                            outputs(DO_ROBOT_PAUSE) = False
-                            LockClamps(True)
-                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                            Catch : End Try
-                            alarmMessage = ""
-                            curtainBlockedTime = DateTime.MinValue
-                        Else
-                            Return  ' รอกด START
-                        End If
+                    outputs(DO_LIGHT_YEL) = False
+                    outputs(DO_LIGHT_RED) = True
+                    
+                    ' กด START (I0.1+I0.2) ถึง resume
+                    If triggerStart Then
+                        Log("SAFETY", $"✓ Operator resumed (OFF events={curtainOffCount})")
+                        outputs(DO_ROBOT_PAUSE) = False
+                        LockClamps(True)
+                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                        Catch : End Try
+                        alarmMessage = ""
+                    Else
+                        Return  ' รอกด START
                     End If
-                Else
-                    ' I0.3 ON = ปกติ หรือ ยังไม่ถึง 2s startup
-                    If curtainBlockedTime <> DateTime.MinValue Then
-                        Dim wasOffMs = (DateTime.Now - curtainBlockedTime).TotalMilliseconds
-                        Log("CURTAIN-DBG", $"I0.3 back ON after {wasOffMs:F0}ms — noise filtered (< 500ms threshold)")
-                    End If
-                    curtainBlockedTime = DateTime.MinValue
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
