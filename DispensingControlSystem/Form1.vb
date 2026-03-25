@@ -454,15 +454,18 @@ Partial Class Form1
                     End If
                 End If
 
-                ' รอรับสัญญาณเสร็จจากหุ่นยนต์
-                If inputs(DI_ROBOT_DONE) Then         
-                    Log("ROBOT", "✓ Dispensing Complete")
-                    outputs(DO_LIGHT_YEL) = False
-                    currentState = MachineStatus.DISPENSE_DONE
-                ElseIf inputs(DI_ROBOT_FAULT) Then    
-                    alarmMessage = "Robot Fault Signal (I0.6)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
+                ' รอรับสัญญาณเสร็จจากหุ่นยนต์ (ต้องรอ 2 วินาทีก่อนรับ DONE — กรอง stale I0.5)
+                Dim runSeconds = (DateTime.Now - clampStartTime).TotalSeconds
+                If runSeconds >= 2 Then
+                    If inputs(DI_ROBOT_DONE) Then         
+                        Log("ROBOT", $"✓ Dispensing Complete (ran {runSeconds:F1}s)")
+                        outputs(DO_LIGHT_YEL) = False
+                        currentState = MachineStatus.DISPENSE_DONE
+                    ElseIf inputs(DI_ROBOT_FAULT) Then    
+                        alarmMessage = "Robot Fault Signal (I0.6)"
+                        Log("FAULT", alarmMessage)
+                        currentState = MachineStatus.FAULT_ALARM
+                    End If
                 End If
 
             ' ── 8. DISPENSE_DONE: หุ่นยนต์ถอย ──
