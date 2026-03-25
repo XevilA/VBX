@@ -292,7 +292,6 @@ Partial Class Form1
                 cbProgramSelect.Invoke(Sub() cbProgramSelect.SelectedIndex = 0)
 
                 If config.MasterBarcode = "*" OrElse config.MasterBarcode = "" OrElse lastBarcode = config.MasterBarcode Then
-                    Log("VERIFY", $"✓ Model Match: {lastBarcode} -> Waiting for Start Confirmation")
                     ' Auto-select program from barcode mapping (exact or prefix match)
                     Dim matchedProg As Integer = -1
                     Dim matchedKey As String = ""
@@ -310,6 +309,17 @@ Partial Class Form1
                             End If
                         Next
                     End If
+                    
+                    ' ถ้ามี mapping แต่ไม่ match → reject
+                    If config.BarcodeProgramMap.Count > 0 AndAlso matchedProg <= 0 Then
+                        alarmMessage = $"Barcode Not Matching! {lastBarcode} — No program mapped"
+                        Log("VERIFY", $"✗ {alarmMessage}")
+                        AddScanHistory(lastBarcode, "❌ NOT MATCHING")
+                        clampStartTime = DateTime.Now
+                        currentState = MachineStatus.MODEL_FAIL
+                        Return
+                    End If
+                    
                     If matchedProg > 0 Then
                         Dim progIdx = matchedProg - 1
                         If progIdx >= 0 AndAlso progIdx < cbProgramSelect.Items.Count Then
@@ -317,6 +327,8 @@ Partial Class Form1
                             Log("PROGRAM", $"Auto-selected Program {matchedProg} (matched '{matchedKey}') for barcode {lastBarcode}")
                         End If
                     End If
+                    
+                    Log("VERIFY", $"✓ Model Match: {lastBarcode} -> Waiting for Start Confirmation")
                     AddScanHistory(lastBarcode, "✓ ACCEPTED")
                     
                     ' รอ Operator กด Start ยืนยันก่อนรัน
@@ -393,30 +405,38 @@ Partial Class Form1
                 LockClamps(True)
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
                 
-                ' ++ ม่านแสง NC: I0.3 OFF = มีคนเข้า → Pause ทันที (ไม่มี delay) ++
+                ' ++ ม่านแสง NC: I0.3 OFF 200ms = มีคนเข้า → Pause (กรอง bounce) ++
                 If Not inputs(DI_CURTAIN) Then
-                    If Not outputs(DO_ROBOT_PAUSE) Then
-                        alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
-                        Log("SAFETY", alarmMessage)
-                        outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
-                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
-                    End If
-                    outputs(DO_LIGHT_YEL) = False
-                    outputs(DO_LIGHT_RED) = True  ' Red solid
+                    If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     
-                    ' กด START ถึง resume (ไม่ auto-resume)
-                    If triggerStart Then
-                        Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
-                        outputs(DO_ROBOT_ESTOP) = False
-                        outputs(DO_ROBOT_PAUSE) = False
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
-                        alarmMessage = ""
-                    Else
-                        Return  ' รอกด START
+                    ' Debounce 200ms — กรอง bounce แต่ยังเร็วพอสำหรับ safety
+                    If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 200 Then
+                        If Not outputs(DO_ROBOT_PAUSE) Then
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
+                            Log("SAFETY", alarmMessage)
+                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
+                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                        End If
+                        outputs(DO_LIGHT_YEL) = False
+                        outputs(DO_LIGHT_RED) = True  ' Red solid
+                        
+                        ' กด START ถึง resume (ไม่ auto-resume)
+                        If triggerStart Then
+                            Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
+                            outputs(DO_ROBOT_ESTOP) = False
+                            outputs(DO_ROBOT_PAUSE) = False
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                            alarmMessage = ""
+                            curtainBlockedTime = DateTime.MinValue
+                        Else
+                            Return  ' รอกด START
+                        End If
                     End If
+                Else
+                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = safe
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
