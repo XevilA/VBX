@@ -316,7 +316,6 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-<<<<<<< HEAD
             ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
@@ -330,14 +329,6 @@ Partial Class Form1
                     alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
                     If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
                 End If
-=======
-            ' ── CURTAIN_CHECK: Log curtain status, always proceed ──
-            Case MachineStatus.CURTAIN_CHECK
-                outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")}")
-                ' Always proceed — runtime safety during DISPENSE_RUNNING handles protection
-                currentState = MachineStatus.DISPENSE_START
->>>>>>> 7cfba92d9c400abb36c4bddb76f899674ecb53a5
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
