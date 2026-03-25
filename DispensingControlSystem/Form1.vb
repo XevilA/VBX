@@ -256,7 +256,10 @@ Partial Class Form1
                         alarmMessage = "Scanner read failed after 3 attempts"
                         Log("SCAN", "✗ " & alarmMessage)
                         scanRetryCount = 0
-                        currentState = MachineStatus.MODEL_FAIL
+                        ' Auto-retract immediately — don't wait for operator
+                        Log("SYSTEM", "Auto-retracting clamp after scanner failure")
+                        clampStartTime = DateTime.Now
+                        currentState = MachineStatus.MODEL_FAIL_RETRACT
                     Else
                         Log("SCAN", $"Read Failed — Retry {scanRetryCount}/3...")
                         Await Task.Delay(500)
@@ -288,6 +291,7 @@ Partial Class Form1
                     alarmMessage = $"Wrong Model! Expected: {config.MasterBarcode}, Got: {lastBarcode}"
                     Log("VERIFY", $"✗ {alarmMessage}")
                     AddScanHistory(lastBarcode, "❌ REJECT")
+                    clampStartTime = DateTime.Now  ' Start 15s auto-retract timer
                     currentState = MachineStatus.MODEL_FAIL
                 End If
             ' ── 4.5 WAIT_START_CONFIRM: รอ Operator กดปุ่ม Start อีกครั้งเพื่อรันหุ่นยนต์ ──
@@ -419,14 +423,21 @@ Partial Class Form1
                     currentState = MachineStatus.VISION_NG
                 End If
 
-            ' ── 10. ERROR WAIT: รอคนกดรับทราบก่อนปลดล็อคชิ้นงาน NG ──
+            ' ── 10. ERROR WAIT: รอคนกดรับทราบ หรือ auto-retract 15 วินาที ──
             Case MachineStatus.MODEL_FAIL, MachineStatus.VISION_NG
                 LockClamps(True) ' ชิ้นงานเสียยังล็อคไว้
                 outputs(DO_LIGHT_RED) = True
                 outputs(DO_LIGHT_GRN) = False
                 
-                If triggerStart Then
-                    Log("SYSTEM", "Operator acknowledged NG — Unlocking")
+                ' Auto-retract after 15 seconds if operator doesn't press START
+                Dim waitElapsed = (DateTime.Now - clampStartTime).TotalSeconds
+                If triggerStart OrElse waitElapsed > 15 Then
+                    If triggerStart Then
+                        Log("SYSTEM", "Operator acknowledged NG — Unlocking")
+                    Else
+                        Log("SYSTEM", "Auto-retract timeout (15s) — Unlocking")
+                    End If
+                    alarmMessage = ""
                     clampStartTime = DateTime.Now
                     If currentState = MachineStatus.MODEL_FAIL Then
                         currentState = MachineStatus.MODEL_FAIL_RETRACT
