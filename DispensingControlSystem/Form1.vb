@@ -410,17 +410,18 @@ Partial Class Form1
                 outputs(DO_LIGHT_RED) = False
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบเท่านั้น
                 
-                ' ++ ม่านแสง: I0.3 ON = มีคนเข้า → Pause + debounce 200ms ++
-                If inputs(DI_CURTAIN) Then
+                ' ++ ม่านแสง: I0.3 ON = ปกติ, I0.3 OFF = มีคนเข้า → Pause ทันที + debounce 200ms ++
+                If Not inputs(DI_CURTAIN) Then
                     If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     
                     ' Debounce 200ms — กรอง bounce
                     If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 200 Then
                         If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=ON) — Press START to resume"
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
                             Log("SAFETY", alarmMessage)
                             outputs(DO_ROBOT_ESTOP) = True    ' Q0.4
                             outputs(DO_ROBOT_PAUSE) = True    ' Q0.6
+                            LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                             Catch : End Try
                         End If
@@ -432,6 +433,7 @@ Partial Class Form1
                             Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
                             outputs(DO_ROBOT_ESTOP) = False
                             outputs(DO_ROBOT_PAUSE) = False
+                            LockClamps(True)
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                             Catch : End Try
                             alarmMessage = ""
@@ -441,7 +443,7 @@ Partial Class Form1
                         End If
                     End If
                 Else
-                    curtainBlockedTime = DateTime.MinValue  ' I0.3 OFF = safe
+                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = ปกติ
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
