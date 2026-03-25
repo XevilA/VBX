@@ -309,38 +309,46 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── 5. CURTAIN_CHECK: เช็คม่านแสงก่อนสั่ง Robot ขยับ ──
+            ' ── 5. CURTAIN_CHECK: แค่ log สถานะม่าน → ไปต่อเลย (safety จริงอยู่ที่ DISPENSE_RUNNING) ──
             Case MachineStatus.CURTAIN_CHECK
                 LockClamps(True)
-                
-                ' ++ สลับ Logic: ถ้าไม่มีคนบัง (I0.3 = OFF) คือปลอดภัย ให้ไปต่อ ++
-                If Not inputs(DI_CURTAIN) Then
-                    Log("SAFETY", "✓ Light Curtain Clear (I0.3=OFF)")
-                    currentState = MachineStatus.DISPENSE_START
-                Else
-                    ' ถ้ามีคนบัง (I0.3 = ON) ให้หยุดรอจนกว่าจะชักมือออก
-                    alarmMessage = "WAITING: Light Curtain BLOCKED (I0.3=ON)"
-                    If animPulse Mod 10 = 0 Then Log("SAFETY", alarmMessage)
-                End If
+                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")} — Proceeding")
+                currentState = MachineStatus.DISPENSE_START
 
             ' ── 6. DISPENSE_START: ส่งบิตโปรแกรมและสั่งหุ่นยนต์ทำงาน ──
             Case MachineStatus.DISPENSE_START
                 LockClamps(True)
                 UpdateProgramBits() ' ส่งบิตโปรแกรมไปยัง PLC
                 
-                ' ยิง Pulse LOAD (Q0.7)
-                outputs(DO_PROG_LOAD) = True         
+                ' Force write program bits to hardware immediately
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                Log("ROBOT", $"Program bits loaded: {cbProgramSelect.SelectedIndex + 1}")
+                
+                ' ยิง Pulse LOAD (Q0.7) — ON
+                outputs(DO_PROG_LOAD) = True
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
                 Await Task.Delay(300)
+                
+                ' LOAD OFF
                 outputs(DO_PROG_LOAD) = False
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                Await Task.Delay(200)
                 
-                Await Task.Delay(100)
-                
-                ' ยิง Pulse START (Q0.5)
-                outputs(DO_ROBOT_START) = True       
+                ' ยิง Pulse START (Q0.5) — ON
+                outputs(DO_ROBOT_START) = True
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
                 Await Task.Delay(500)
-                outputs(DO_ROBOT_START) = False
                 
-                Log("ROBOT", "▶ Robot Dispensing Started")
+                ' START OFF
+                outputs(DO_ROBOT_START) = False
+                Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                Catch : End Try
+                
+                Log("ROBOT", "▶ Robot START pulse sent — waiting for I0.4 Running")
                 
                 ' จับเวลาไว้เช็คว่าหุ่นยนต์ยอมเดินไหม
                 clampStartTime = DateTime.Now 
@@ -369,12 +377,12 @@ Partial Class Form1
                     Log("SAFETY", "Light Curtain Restored — Resuming (I0.3=OFF)")
                 End If
                 
-                ' --- เช็ค Running (I0.4) เพื่อป้องกันหุ่นยนต์ไม่เดิน (8s timeout) ---
+                ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
                 If Not inputs(DI_ROBOT_RUN) AndAlso Not inputs(DI_ROBOT_DONE) AndAlso (DateTime.Now - clampStartTime).TotalSeconds > 8 Then
-                    alarmMessage = "Robot Failed to Start (No I0.4 Running Signal after 8s)"
-                    Log("FAULT", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                    Return
+                    If alarmMessage = "" Then
+                        alarmMessage = "⚠ No I0.4 Running — Waiting for Robot DONE..."
+                        Log("WARN", "Robot I0.4 not detected after 8s — still waiting for I0.5 DONE signal")
+                    End If
                 End If
 
                 ' รอรับสัญญาณเสร็จจากหุ่นยนต์
