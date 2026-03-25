@@ -402,27 +402,29 @@ Partial Class Form1
                 
            ' ── 7. DISPENSE_RUNNING: หุ่นยนต์กำลังทำงาน (ม่านแสงมีผลแค่จุดนี้) ──
             Case MachineStatus.DISPENSE_RUNNING
-                LockClamps(True)
-                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบ
+                LockClamps(True)               ' ห้ามคลาย clamp!
+                outputs(DO_LIGHT_GRN) = False   ' ไฟเขียวปิด (ตาม flowchart)
+                outputs(DO_LIGHT_RED) = False
+                outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบเท่านั้น
                 
-                ' ++ ม่านแสง NC: I0.3 OFF 200ms = มีคนเข้า → Pause (กรอง bounce) ++
-                If Not inputs(DI_CURTAIN) Then
+                ' ++ ม่านแสง: I0.3 ON = มีคนเข้า → Pause + debounce 200ms ++
+                If inputs(DI_CURTAIN) Then
                     If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
                     
-                    ' Debounce 200ms — กรอง bounce แต่ยังเร็วพอสำหรับ safety
+                    ' Debounce 200ms — กรอง bounce
                     If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 200 Then
                         If Not outputs(DO_ROBOT_PAUSE) Then
-                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=ON) — Press START to resume"
                             Log("SAFETY", alarmMessage)
-                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4 Emergency Stop
-                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6 Robot Pause
+                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4
+                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6
                             Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
                             Catch : End Try
                         End If
                         outputs(DO_LIGHT_YEL) = False
-                        outputs(DO_LIGHT_RED) = True  ' Red solid
+                        outputs(DO_LIGHT_RED) = True
                         
-                        ' กด START ถึง resume (ไม่ auto-resume)
+                        ' กด START ถึง resume
                         If triggerStart Then
                             Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
                             outputs(DO_ROBOT_ESTOP) = False
@@ -436,7 +438,7 @@ Partial Class Form1
                         End If
                     End If
                 Else
-                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = safe
+                    curtainBlockedTime = DateTime.MinValue  ' I0.3 OFF = safe
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
