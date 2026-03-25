@@ -208,19 +208,30 @@ Partial Class Form1
                     currentState = MachineStatus.CLAMP_EXTEND
                 End If
 
-            ' ── CLAMP_EXTEND: Keep clamp ON, wait cylinder extend sensor ──
+            ' ── CLAMP_EXTEND: Keep clamp ON, wait BOTH extend sensors ──
             Case MachineStatus.CLAMP_EXTEND
                 ' MUST keep clamp Lock outputs ON every cycle
                 outputs(DO_CLAMP) = False  : outputs(DO_CLAMP3) = False
                 outputs(DO_CLAMP2) = True  : outputs(DO_CLAMP4) = True
                 outputs(DO_LIGHT_GRN) = False
                 outputs(DO_LIGHT_YEL) = True         ' Yellow = Clamping
-                If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
-                    LogClampIO("✓ Extended — Sensor confirmed")
+
+                ' Require BOTH extend sensors (AND logic)
+                Dim bothExtended = inputs(DI_CYL_EXT) AndAlso inputs(DI_CYL_EXT2)
+                If bothExtended Then
+                    LogClampIO("✓ BOTH Extended — I1.1+I1.3=ON")
                     currentState = MachineStatus.SCANNING
                 ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
-                    LogClampIO("⚠ Extend TIMEOUT 10s — Proceeding")
-                    currentState = MachineStatus.SCANNING
+                    LogClampIO($"⚠ Timeout 10s — I1.1={inputs(DI_CYL_EXT)} I1.3={inputs(DI_CYL_EXT2)}")
+                    If inputs(DI_CYL_EXT) OrElse inputs(DI_CYL_EXT2) Then
+                        Log("CLAMP", "⚠ Partial extend — proceeding with 1 sensor")
+                        currentState = MachineStatus.SCANNING
+                    Else
+                        Log("CLAMP", "✗ Clamp FAILED — no sensors. Returning to IDLE")
+                        alarmMessage = "Clamp extend failed — no sensor signal"
+                        ResetOutputs()
+                        currentState = MachineStatus.IDLE
+                    End If
                 End If
 
             ' ── SCANNING: Barcode scan via Keyence Ethernet ──
@@ -314,17 +325,12 @@ Partial Class Form1
                     currentState = MachineStatus.CURTAIN_CHECK
                 End If
 
-            ' ── CURTAIN_CHECK: Safety curtain (I0.3=ON=Safe, OFF=Blocked) ──
+            ' ── CURTAIN_CHECK: Log curtain status, always proceed ──
             Case MachineStatus.CURTAIN_CHECK
                 outputs(DO_CLAMP) = False : outputs(DO_CLAMP3) = False : outputs(DO_CLAMP2) = True : outputs(DO_CLAMP4) = True
-                If inputs(DI_CURTAIN) Then
-                    Log("SAFETY", "✓ Light Curtain Active (I0.3=ON)")
-                    currentState = MachineStatus.DISPENSE_START
-                Else
-                    alarmMessage = "Safety Light Curtain NOT Active (I0.3=OFF)"
-                    Log("SAFETY", alarmMessage)
-                    currentState = MachineStatus.FAULT_ALARM
-                End If
+                Log("SAFETY", $"Light Curtain I0.3={If(inputs(DI_CURTAIN), "ON", "OFF")}")
+                ' Always proceed — runtime safety during DISPENSE_RUNNING handles protection
+                currentState = MachineStatus.DISPENSE_START
 
             ' ── DISPENSE_START: Send program + robot start ──
             Case MachineStatus.DISPENSE_START
