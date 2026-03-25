@@ -452,33 +452,42 @@ Partial Class Form1
                 outputs(DO_LIGHT_RED) = False
                 outputs(DO_LIGHT_YEL) = (animPulse Mod 4 < 2) ' ไฟเหลืองกะพริบเท่านั้น
                 
-                ' ++ ม่านแสง: I0.3 ON = ปกติ, I0.3 OFF = มีคนเข้า → Pause ทันที (ไม่มี debounce) ++
-                If Not inputs(DI_CURTAIN) Then
-                    ' ★ INSTANT PAUSE — หยุดทันทีเหมือน E-Stop
-                    If Not outputs(DO_ROBOT_PAUSE) Then
-                        alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
-                        Log("SAFETY", alarmMessage)
-                        outputs(DO_ROBOT_ESTOP) = True    ' Q0.4
-                        outputs(DO_ROBOT_PAUSE) = True    ' Q0.6
-                        LockClamps(True)
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
+                ' ++ ม่านแสง: I0.3 ON = ปกติ, I0.3 OFF = มีคนเข้า → Pause ++
+                ' ★ ข้ามเช็ค 1 วินาทีแรก — ให้ robot เริ่มวิ่งก่อน (กัน noise ตอน startup)
+                Dim runElapsed = (DateTime.Now - clampStartTime).TotalSeconds
+                If runElapsed >= 1.0 AndAlso Not inputs(DI_CURTAIN) Then
+                    ' Debounce 100ms — กรอง noise แต่ยังเร็ว
+                    If curtainBlockedTime = DateTime.MinValue Then curtainBlockedTime = DateTime.Now
+                    If (DateTime.Now - curtainBlockedTime).TotalMilliseconds >= 100 Then
+                        ' ★ PAUSE ทันที — หยุดเหมือน E-Stop
+                        If Not outputs(DO_ROBOT_PAUSE) Then
+                            alarmMessage = "⚠ Light Curtain Interrupted (I0.3=OFF) — Press START to resume"
+                            Log("SAFETY", alarmMessage)
+                            outputs(DO_ROBOT_ESTOP) = True    ' Q0.4
+                            outputs(DO_ROBOT_PAUSE) = True    ' Q0.6
+                            LockClamps(True)
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                        End If
+                        outputs(DO_LIGHT_YEL) = False
+                        outputs(DO_LIGHT_RED) = True
+                        
+                        ' กด START (I0.1+I0.2) ถึง resume
+                        If triggerStart Then
+                            Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
+                            outputs(DO_ROBOT_ESTOP) = False
+                            outputs(DO_ROBOT_PAUSE) = False
+                            LockClamps(True)
+                            Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
+                            Catch : End Try
+                            alarmMessage = ""
+                            curtainBlockedTime = DateTime.MinValue
+                        Else
+                            Return  ' รอกด START
+                        End If
                     End If
-                    outputs(DO_LIGHT_YEL) = False
-                    outputs(DO_LIGHT_RED) = True
-                    
-                    ' กด START (I0.1+I0.2) ถึง resume
-                    If triggerStart Then
-                        Log("SAFETY", "✓ Operator confirmed — Resuming robot (clamp locked)")
-                        outputs(DO_ROBOT_ESTOP) = False
-                        outputs(DO_ROBOT_PAUSE) = False
-                        LockClamps(True)
-                        Try : If modbusClient IsNot Nothing AndAlso modbusClient.Connected Then modbusClient.WriteMultipleCoils(0, outputs)
-                        Catch : End Try
-                        alarmMessage = ""
-                    Else
-                        Return  ' รอกด START
-                    End If
+                Else
+                    curtainBlockedTime = DateTime.MinValue  ' I0.3 ON = ปกติ หรือ ยังไม่ถึง 1s
                 End If
                 
                 ' --- เช็ค Running (I0.4) — แค่ warning ไม่ตัด ให้รอ DONE ต่อ ---
