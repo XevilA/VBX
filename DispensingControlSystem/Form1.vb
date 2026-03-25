@@ -184,21 +184,16 @@ Partial Class Form1
             alarmMessage = "EMERGENCY STOP — I0.0 Safety Circuit Open"
         End If
 
-        ' ── เมื่อมีการร้องขอ Reset (F2, ปุ่ม HMI, หรือออโต้รีเซ็ตตอนจบงาน) ──
+        ' ── เมื่อมีการกด Reset (F2) ──
         If triggerReset Then
             currentState = MachineStatus.IDLE
             isEStopActive = False
             isPaused = False
             alarmMessage = ""
             lastBarcode = ""
-            scanRetryCount = 0
-            curtainOffCount = 0
-            robotHasStarted = False
-            previousCurtainState = True
-            curtainBlockedTime = DateTime.MinValue
             ResetOutputs()
             clampShouldBeLocked = False
-            Log("SYSTEM", "System Reset Complete — Ready for next cycle")
+            Log("SYSTEM", "Manual Reset Initiated")
             Return
         End If
 
@@ -253,7 +248,7 @@ Partial Class Form1
                 Catch : End Try
                 
                 Log("SYSTEM", "✓ Robot Home command sent — System ready (Set Zero)")
-                isSoftwareResetRequested = True ' ★ สั่ง Full Reset หลังกลับ Home
+                currentState = MachineStatus.IDLE
             End If
             Return
         End If
@@ -611,8 +606,10 @@ Partial Class Form1
                         ' กรณีจบงานเสีย
                         outputs(DO_LIGHT_RED) = False
                         outputs(DO_LIGHT_GRN) = True
+                        alarmMessage = ""
+                        lastBarcode = "N/A"
                         Log("CLAMP", "✓ Unlocked — Remove NG Part")
-                        isSoftwareResetRequested = True  ' ★ Auto-reset หลังจบงานเสีย
+                        currentState = MachineStatus.IDLE
                     End If
                 ElseIf (DateTime.Now - clampStartTime).TotalSeconds > 10 Then
                     alarmMessage = "Clamp Unlock TIMEOUT (Check Sensors I1.1, I1.3)"
@@ -624,7 +621,7 @@ Partial Class Form1
                 outputs(DO_LIGHT_GRN) = True
                 ' ส่งข้อมูลไป Server (ถ้ามี)
                 Await Task.Delay(500)
-                isSoftwareResetRequested = True ' ★ Auto-reset กลับเป็นค่าเริ่มต้นเตรียมพร้อมรอบใหม่
+                currentState = MachineStatus.IDLE
 
             ' ── 13. FAULT_ALARM: แจ้งเตือนข้อผิดพลาดระบบ ──
             Case MachineStatus.FAULT_ALARM
